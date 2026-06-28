@@ -1,0 +1,183 @@
+<?php
+/**
+ * Ejecuta los tests de un plugin contra el entorno de pruebas
+ * (test-env/facturascripts) y devuelve el resultado estructurado.
+ *
+ * Replica el flujo de `fsmaker run-tests` (copiar Test/<sub> al core, activar
+ * plugins, lanzar PHPUnit) pero con --log-junit y la config phpunit-webrunner.xml
+ * (que NO para al primer fallo), para mostrar todos los casos en la web.
+ *
+ * Las ejecuciones se serializan con flock: la BD de pruebas y la carpeta
+ * Test/Plugins/ del core son recursos compartidos.
+ */
+
+namespace TestWeb;
+
+class TestRunner
+{
+    /** @var string */
+    private $baseDir;
+    /** @var string */
+    private $fsDir;
+
+    public function __construct(string $baseDir)
+    {
+        $this->baseDir = $baseDir;
+        $this->fsDir = $baseDir . '/test-env/facturascripts';
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function run(string $plugin, string $sub): array
+    {
+        if (!$this->safe($plugin) || !$this->safe($sub)) {
+            return $this->fail('Parámetros no válidos.');
+        }
+
+        $srcTest = $this->baseDir . '/src/Plugins/' . $plugin . '/Test/' . $sub;
+        if (!is_dir($srcTest)) {
+            return $this->fail('No existe la carpeta de tests: ' . $srcTest);
+        }
+        if (!is_file($this->fsDir . '/Core/Kernel.php') || !is_file($this->fsDir . '/config.php')) {
+            return $this->fail('El entorno de pruebas no está provisionado (falta el core o config.php).');
+        }
+        $phpunit = $this->fsDir . '/vendor/bin/phpunit';
+        if (!is_file($phpunit)) {
+            return $this->fail('Falta PHPUnit. Provisiona el entorno (composer install).');
+        }
+
+        // config: preferimos la del runner web (sin stopOnFailure); si no, la estándar.
+        $config = is_file($this->fsDir . '/phpunit-webrunner.xml')
+            ? 'phpunit-webrunner.xml'
+            : 'phpunit-plugins.xml';
+
+        // --- lock (serializa ejecuciones) ---
+        $lockPath = $this->baseDir . '/test-env/.webrunner.lock';
+        $lock = fopen($lockPath, 'c');
+        if ($lock === false || !flock($lock, LOCK_EX)) {
+            return $this->fail('No se pudo adquirir el lock de ejecución.');
+        }
+
+        $dest = $this->fsDir . '/Test/Plugins';
+        $junit = tempnam(sys_get_temp_dir(), 'junit_') . '.xml';
+        $log = [];
+
+        try {
+            // 1) preparar Test/Plugins con los tests del plugin
+            self::rrmdirContents($dest);
+            if (!is_dir($dest)) {
+                mkdir($dest, 0777, true);
+            }
+            self::copyDir($srcTest, $dest);
+
+            // 2) activar plugins requeridos (install-plugins.php activa uno por
+            //    ejecución y sale; lo llamamos en bucle hasta que no quede ninguno).
+            $maxIterations = 25;
+            for ($i = 0; $i < $maxIterations; $i++) {
+                [, $out, ] = $this->exec('php Test/install-plugins.php');
+                $log[] = trim($out);
+                if (strpos($out, 'enabled') === false && strpos($out, 'not found') === false) {
+                    break;
+                }
+                if (strpos($out, 'not found') !== false) {
+                    break;
+                }
+            }
+
+            // 3) ejecutar PHPUnit con logging JUnit
+            $cmd = 'php ' . escapeshellarg('vendor/bin/phpunit')
+                . ' -c ' . escapeshellarg($config)
+                . ' --log-junit ' . escapeshellarg($junit);
+            [$exitCode, $stdout, ] = $this->exec($cmd);
+
+            $junitXml = is_file($junit) ? (string)file_get_contents($junit) : '';
+            $parsed = JUnitParser::parse($junitXml);
+        } finally {
+            // 4) limpiar Test/Plugins y soltar el lock
+            self::rrmdirContents($dest);
+            @unlink($junit);
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+
+        return [
+            'ok' => true,
+            'plugin' => $plugin,
+            'sub' => $sub,
+            'config' => $config,
+            'exitCode' => $exitCode ?? -1,
+            'stdout' => $stdout ?? '',
+            'installLog' => implode("\n", array_filter($log)),
+            'suites' => $parsed['suites'] ?? [],
+            'totals' => $parsed['totals'] ?? [],
+        ];
+    }
+
+    /**
+     * Ejecuta un comando dentro de la carpeta del core, capturando stdout+stderr.
+     *
+     * @return array{0:int,1:string,2:string}
+     */
+    private function exec(string $command): array
+    {
+        $descriptors = [
+            1 => ['pipe', 'w'],
+            2 => ['pipe', 'w'],
+        ];
+        $process = proc_open($command, $descriptors, $pipes, $this->fsDir);
+        if (!is_resource($process)) {
+            return [-1, '', 'No se pudo iniciar: ' . $command];
+        }
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exit = proc_close($process);
+        return [$exit, $stdout . $stderr, $stderr];
+    }
+
+    private function fail(string $message): array
+    {
+        return ['ok' => false, 'error' => $message];
+    }
+
+    private function safe(string $segment): bool
+    {
+        return $segment !== '' && strpbrk($segment, "/\\") === false && strpos($segment, '..') === false;
+    }
+
+    /** Borra el contenido de un directorio sin borrar el propio directorio. */
+    private static function rrmdirContents(string $dir): void
+    {
+        if (!is_dir($dir)) {
+            return;
+        }
+        $items = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($dir, \RecursiveDirectoryIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($items as $item) {
+            $item->isDir() ? @rmdir($item->getRealPath()) : @unlink($item->getRealPath());
+        }
+    }
+
+    /** Copia recursivamente el contenido de $source dentro de $dest. */
+    private static function copyDir(string $source, string $dest): void
+    {
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($source, \RecursiveDirectoryIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($iterator as $item) {
+            $target = $dest . DIRECTORY_SEPARATOR . $iterator->getSubPathName();
+            if ($item->isDir()) {
+                if (!is_dir($target)) {
+                    mkdir($target, 0777, true);
+                }
+            } else {
+                copy($item->getRealPath(), $target);
+            }
+        }
+    }
+}

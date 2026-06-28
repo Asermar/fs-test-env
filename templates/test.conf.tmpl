@@ -1,0 +1,21 @@
+<VirtualHost *:80>
+    ServerName test.mesafs.asermar.com
+    ServerAdmin webmaster@localhost
+
+    # La app del runner de tests (versionada en el repo). El repo se monta dentro
+    # del contenedor en su MISMA ruta absoluta que en el host, para que los
+    # symlinks de los plugins y las rutas que resuelve PHPUnit funcionen igual.
+    DocumentRoot /home/alexis/Dev/Mesa_FS/podman/test/app/public
+    DirectoryIndex index.php
+
+    <Directory /home/alexis/Dev/Mesa_FS/podman/test/app/public>
+        Options -Indexes +FollowSymLinks
+        AllowOverride None
+        Require all granted
+    </Directory>
+
+    ErrorLog ${APACHE_LOG_DIR}/test_error.log
+    CustomLog ${APACHE_LOG_DIR}/test_access.log combined
+</VirtualHost>
+
+# vim: syntax=apache ts=4 sw=4 sts=4 sr noet
