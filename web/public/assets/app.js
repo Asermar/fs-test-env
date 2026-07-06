@@ -144,12 +144,27 @@ function renderPluginView(p) {
 
     for (const s of p.subs) {
         const block = el('div', { class: 'sub-block' });
+        const cards = [];                 // tarjetas de esta carpeta (para colapsar/expandir)
+        const subRunners = [];            // runners por fichero de esta carpeta (plugins)
+        const folderTests = s.files.reduce((a, f) => a + (f.tests || 0), 0);
+
+        // botón verde para ejecutar toda la carpeta y botón para colapsar/expandir.
+        const folderBtn = el('button', { class: 'run', text: `▶ Ejecutar Test en Carpeta (${folderTests})` });
+        const toggleBtn = el('button', { class: 'ghost', text: '⊕ Expandir' });
         const subHead = el('div', { class: 'sub-name' }, [
-            el('span', { text: s.sub + (s.deps ? ' · deps: ' + s.deps.replace(/\s+/g, ', ') : '') })
+            el('span', { text: s.sub + (s.deps ? ' · deps: ' + s.deps.replace(/\s+/g, ', ') : '') }),
+            el('div', { class: 'sub-actions' }, [toggleBtn, folderBtn])
         ]);
 
-        // panel de resultados a nivel de carpeta: solo para el botón "carpeta" del core.
-        // (En plugins cada fichero muestra su resultado dentro de su propia tarjeta.)
+        // colapsar/expandir todas las tarjetas de la carpeta
+        toggleBtn.addEventListener('click', () => {
+            const anyCollapsed = cards.some(c => c.classList.contains('collapsed'));
+            cards.forEach(c => c.classList.toggle('collapsed', !anyCollapsed));
+            toggleBtn.textContent = anyCollapsed ? '⊖ Colapsar' : '⊕ Expandir';
+        });
+
+        // panel de resultados a nivel de carpeta: solo para el core (una única ejecución
+        // de PHPUnit sobre la carpeta). En plugins la carpeta ejecuta fichero a fichero.
         let subSlot = null;
         if (p.isCore) {
             subSlot = makeSlot('Test/' + s.sub);
@@ -160,15 +175,18 @@ function renderPluginView(p) {
                 forget(k => k.indexOf(folderPath + '/') === 0); // olvida ficheros de esta carpeta
                 record(folderPath, data);
             };
-            const folderTests = s.files.reduce((a, f) => a + (f.tests || 0), 0);
-            const folderBtn = el('button', { class: 'ghost', text: `▶ Ejecutar Test en Carpeta (${folderTests})` });
             folderBtn.addEventListener('click', () => runFolder(folderBtn));
-            subHead.appendChild(folderBtn);
             runners.push(() => runFolder(null));
+        } else {
+            folderBtn.addEventListener('click', async () => {
+                folderBtn.disabled = true;
+                for (const r of subRunners) {
+                    await r();
+                }
+                folderBtn.disabled = false;
+            });
         }
         block.appendChild(subHead);
-
-        const cards = [];
         for (const f of s.files) {
             const runBtn = el('button', { class: 'run', text: '▶ Ejecutar' });
             const actions = [runBtn];
@@ -190,7 +208,8 @@ function renderPluginView(p) {
                     record(s.sub + '/' + f.name, data);
                 };
                 runBtn.addEventListener('click', () => runFile(runBtn));
-                runners.push(() => runFile(null));
+                runners.push(() => runFile(null));      // "Ejecutar todos" (cabecera)
+                subRunners.push(() => runFile(null));   // "Ejecutar Test en Carpeta"
                 // "Ver código" se despliega en el mismo panel de la tarjeta.
                 const srcBtn = el('button', { class: 'ghost', text: '</> Ver código' });
                 srcBtn.addEventListener('click', () => viewSource(p.plugin, s.sub, f.name, cardSlot));

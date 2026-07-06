@@ -98,13 +98,13 @@ body {
     letter-spacing: 0.01em;
     margin-bottom: 0.6rem;
 }
-/* el botón "carpeta" no hereda el tamaño/peso/color de la etiqueta de carpeta */
+/* los botones de la carpeta no heredan el tamaño/peso/espaciado de la etiqueta */
 .sub-name button {
     font-size: 0.82rem;
-    font-weight: 500;
+    font-weight: 600;
     letter-spacing: normal;
-    color: var(--text);
 }
+.sub-actions { display: flex; gap: 0.5rem; align-items: center; margin-left: auto; }
 
 /* Tarjeta por fichero de test */
 .test-card {
