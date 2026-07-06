@@ -65,6 +65,13 @@ switch ($action) {
         break;
 }
 
+/** Versión del entorno de test (fichero VERSION del submódulo fs-test-env). */
+function env_version(): string
+{
+    $f = dirname(__DIR__, 2) . '/VERSION';
+    return is_file($f) ? trim((string)file_get_contents($f)) : '';
+}
+
 /** Referencia (tag o rama) del core de FacturaScripts provisionado en test-env. */
 function core_ref(string $base): string
 {
@@ -102,6 +109,7 @@ function render_page(array $plugins, string $coreRef): void
     $totalTests = array_sum(array_map(static fn($p) => $p['total'], $plugins));
     $nPlugins = count($plugins);
     $title = getenv('TEST_WEB_TITLE') ?: 'Tests de plugins';
+    $envVersion = env_version();
     ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -118,7 +126,8 @@ function render_page(array $plugins, string $coreRef): void
         <h1><?= htmlspecialchars($title, ENT_QUOTES) ?></h1>
         <div class="meta">
             <?= $nPlugins ?> plugins · <?= $totalTests ?> ficheros de test<?php if ($coreRef !== ''): ?>
-            · core <span class="core-ref"><?= htmlspecialchars($coreRef, ENT_QUOTES) ?></span><?php endif ?>
+            · core <span class="core-ref"><?= htmlspecialchars($coreRef, ENT_QUOTES) ?></span><?php endif ?><?php if ($envVersion !== ''): ?>
+            · entorno <span class="core-ref">v<?= htmlspecialchars($envVersion, ENT_QUOTES) ?></span><?php endif ?>
         </div>
     </header>
 

@@ -85,6 +85,22 @@ además de la instalada, las **5 versiones (tags) más recientes** del repo de o
 - Web: el host configurado en `TESTENV_HOST` (runner navegable).
 - CLI: `cd <TESTENV_DIR> && vendor/bin/phpunit Plugins/<Plugin>/Test`.
 
+## Versión del entorno
+
+El tooling se versiona con el fichero **`VERSION`** (semver) en la raíz del repo, replicado en
+un **tag** `vX.Y.Z` por release. La web lo muestra en la cabecera (`entorno vX.Y.Z`).
+
+Para saber si los scripts instalados están al día respecto al remoto:
+
+```bash
+test-bin/bin/version.sh
+#  Entorno de test instalado: v1.0.0
+#  Entorno de test remoto:    v1.0.1
+#  => Hay una versión más reciente (v1.0.1). Actualiza el submódulo test-bin: ...
+```
+
+Al hacer cambios en el tooling, sube el número de `VERSION` y crea el tag correspondiente.
+
 ## Convención de descripciones de test
 
 Cada `*Test.php` puede documentar clase y métodos con un bloque `@description` (markdown) en su
