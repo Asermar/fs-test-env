@@ -63,6 +63,9 @@ if command -v git >/dev/null 2>&1; then
     if [ -d "$TESTENV_DIR/.git" ]; then
         echo ">> Actualizando core existente..."
         git -C "$TESTENV_DIR" checkout -- Test/bootstrap.php 2>/dev/null || true
+        # revertimos también install-plugins.php (lo regeneramos más abajo) para que
+        # el pull --ff-only no falle por cambios locales sobre un archivo del core.
+        git -C "$TESTENV_DIR" checkout -- Test/install-plugins.php 2>/dev/null || true
         git -C "$TESTENV_DIR" fetch --quiet origin
         git -C "$TESTENV_DIR" checkout "$CORE_BRANCH"
         git -C "$TESTENV_DIR" pull --ff-only origin "$CORE_BRANCH"
@@ -145,22 +148,8 @@ echo ">> Plugins a activar (orden por dependencias): $ENABLE_LIST"
 mkdir -p "$TESTENV_DIR/Test/Plugins"
 echo "$ENABLE_LIST" > "$TESTENV_DIR/Test/Plugins/install-plugins.txt"
 
-# install-plugins.php activa UN plugin (el primero no activo) por ejecución y
-# sale; lo llamamos en bucle. Los ya activos los salta.
-activate_plugins() {
-    echo ">> Activando plugins (puede tardar)..."
-    set +e
-    local count line out
-    count="$(awk -F, '{print NF}' <<<"$ENABLE_LIST")"
-    for _ in $(seq 1 "$((count + 1))"); do
-        out="$(cd "$TESTENV_DIR" && php Test/install-plugins.php 2>/dev/null)"
-        line="$(grep -E 'enabled|not found' <<<"$out" | head -n1)"
-        [ -z "$line" ] && break
-        echo "   $line"
-        grep -q 'not found' <<<"$line" && break
-    done
-    set -e
-}
+# La activación la hace Test/install-plugins.php (sincroniza al conjunto exacto de
+# Test/Plugins/install-plugins.txt). Ver la orquestación al final del script.
 
 warmup_schema() {
     echo ">> Construyendo esquema de la BD de pruebas (warm-up)..."
@@ -262,15 +251,91 @@ $db->exec('SET FOREIGN_KEY_CHECKS=1');
 echo "   Tablas verificadas/creadas. OK=$ok FAIL=$fail\n";
 PHP
 
-# --- 10) orquestación: activar -> warm-up -> activar -> warm-up ---
-# Dos rondas a propósito: algunos plugins ejecutan en su post-enable código que
-# necesita el esquema ya creado (p.ej. BusImportacion guarda EmailNotification).
-# Esos no pueden activarse en la 1ª ronda (la tabla aún no existe); el warm-up
-# crea las tablas y la 2ª ronda los activa. El 2º warm-up crea ya sus tablas.
-activate_plugins
+# --- 9b) generar Test/install-plugins.php (versión "sincronizar al conjunto exacto") ---
+# Reemplaza al de core (que solo activa). Deja los plugins activos EXACTAMENTE igual a la
+# lista de Test/Plugins/install-plugins.txt: desactiva lo que sobre y activa lo que falte.
+# Así install-plugins.txt es autoritativo por juego de tests (soporta tests de ausencia).
+echo ">> Generando Test/install-plugins.php (sync)..."
+cat > "$TESTENV_DIR/Test/install-plugins.php" <<'PHP'
+<?php
+// Sincroniza los plugins activos con la lista EXACTA de Test/Plugins/install-plugins.txt.
+// Generado por bin/test-env-provision.sh (test-env está en .gitignore).
+
+use FacturaScripts\Core\Base\DataBase;
+use FacturaScripts\Core\Cache;
+use FacturaScripts\Core\Kernel;
+use FacturaScripts\Core\Plugins;
+
+define('FS_FOLDER', getcwd());
+require_once FS_FOLDER . '/vendor/autoload.php';
+
+$config = FS_FOLDER . '/config.php';
+if (!file_exists($config)) {
+    die($config . " not found!\n");
+}
+require_once $config;
+
+$db = new DataBase();
+$db->connect();
+Cache::clear();
+Kernel::init();
+Plugins::init();
+
+// lista objetivo: conjunto exacto de plugins activos para este juego de tests
+$target = [];
+$listPath = __DIR__ . '/Plugins/install-plugins.txt';
+if (file_exists($listPath)) {
+    foreach (explode(',', (string)file_get_contents($listPath)) as $item) {
+        $item = trim($item);
+        if ($item !== '') {
+            $target[] = $item;
+        }
+    }
+}
+
+// 1) desactivar todo lo activo que no esté en la lista
+foreach (Plugins::enabled() as $name) {
+    if (!in_array($name, $target, true)) {
+        Plugins::disable($name);
+    }
+}
+
+// 2) activar, en el orden indicado (dependencias), lo que falte
+foreach ($target as $plugin) {
+    if (null === Plugins::get($plugin)) {
+        echo '-> Plugin ' . $plugin . ' no localizado.' . PHP_EOL;
+        $db->close();
+        exit(2);
+    }
+    if (!Plugins::isEnabled($plugin)) {
+        Plugins::enable($plugin);
+    }
+}
+
+// resumen: evitamos las subcadenas 'enabled'/'not found' para que el bucle del runner
+// web pare tras esta única pasada (ya ha sincronizado todo).
+echo 'Entorno sincronizado. Activos: ' . implode(',', Plugins::enabled()) . PHP_EOL;
+$db->close();
+PHP
+
+# --- 10) orquestación: construir esquema con TODO activo y dejar TODO desactivado ---
+# 1) Activamos todos los plugins (orden topológico) y creamos sus tablas. Dos rondas a
+#    propósito: algunos plugins ejecutan en su post-enable código que necesita el esquema
+#    ya creado (p.ej. BusImportacion guarda EmailNotification); no se activan en la 1ª
+#    ronda (la tabla aún no existe), el warm-up las crea y la 2ª ronda los activa.
+echo ">> Construyendo esquema (activar todos + warm-up, 2 rondas)..."
+echo "$ENABLE_LIST" > "$TESTENV_DIR/Test/Plugins/install-plugins.txt"
+( cd "$TESTENV_DIR" && php Test/install-plugins.php >/dev/null 2>&1 ) || true
 warmup_schema
-activate_plugins
+( cd "$TESTENV_DIR" && php Test/install-plugins.php >/dev/null 2>&1 ) || true
 warmup_schema
+
+# 2) Pizarra limpia: sincronizamos a lista VACÍA => se desactivan todos los plugins.
+#    Las tablas creadas en el warm-up permanecen; cada juego de tests activará luego
+#    exactamente los plugins de su install-plugins.txt.
+echo ">> Dejando todos los plugins desactivados (pizarra limpia)..."
+: > "$TESTENV_DIR/Test/Plugins/install-plugins.txt"
+( cd "$TESTENV_DIR" && php Test/install-plugins.php >/dev/null 2>&1 ) || true
 
 echo
 echo "================================================================"
