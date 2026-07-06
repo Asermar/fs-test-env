@@ -8,6 +8,7 @@
     --accent: #4c8bf5;
     --green: #2ecc71;
     --red: #e74c3c;
+    --orange: #e67e22;
     --yellow: #f1c40f;
     --gray: #7f8c8d;
 }
@@ -303,13 +304,20 @@ button.run {
     box-shadow: 0 1px 0 rgba(0,0,0,0.25);
 }
 button.run:hover { filter: brightness(1.08); border-color: var(--green); }
-/* variante "fichero a fichero": contorno verde, para distinguirla del run agregado */
-button.run.alt {
-    background: transparent;
-    color: var(--green);
-    box-shadow: none;
+/* "Ejecutar Test en Carpeta" (agregado): relleno naranja */
+button.run.folder {
+    background: var(--orange);
+    border-color: var(--orange);
+    color: #2a1500;
 }
-button.run.alt:hover { background: rgba(46,204,113,0.12); }
+button.run.folder:hover { filter: brightness(1.08); border-color: var(--orange); }
+/* "Ejecutar todos": relleno rojo */
+button.run.danger {
+    background: var(--red);
+    border-color: var(--red);
+    color: #fff;
+}
+button.run.danger:hover { filter: brightness(1.08); border-color: var(--red); }
 
 /* Botón secundario (ver código) */
 button.ghost {
