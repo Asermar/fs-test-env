@@ -68,14 +68,205 @@ class TestScanner
         return $result;
     }
 
-    /** Cuenta los métodos test*() de un fichero de test (nº de tests a ejecutar). */
+    /**
+     * Cuenta los tests reales de un fichero: cada método test*() (o con @test) cuenta 1,
+     * salvo que use @dataProvider, en cuyo caso cuenta el nº de casos que aporta el provider
+     * (elementos del array que devuelve, o nº de yields). Coincide con lo que ejecuta PHPUnit.
+     */
     private function countTests(string $absPath): int
     {
         $src = @file_get_contents($absPath);
         if ($src === false) {
             return 0;
         }
-        return preg_match_all('/function\s+test\w*\s*\(/i', $src);
+
+        $funcs = $this->parseFunctions($src); // nombre => ['doc' => string, 'datasets' => int|null]
+
+        $total = 0;
+        foreach ($funcs as $name => $info) {
+            $isTest = stripos($name, 'test') === 0 || preg_match('/@test\b/', $info['doc']);
+            if (!$isTest) {
+                continue;
+            }
+            if (preg_match('/@dataProvider\s+([\\\\A-Za-z0-9_:]+)/', $info['doc'], $m)) {
+                $prov = $m[1];
+                if (($pos = strrpos($prov, '::')) !== false) {
+                    $prov = substr($prov, $pos + 2);
+                }
+                $n = $funcs[$prov]['datasets'] ?? null;
+                $total += ($n && $n > 0) ? $n : 1; // si no se puede contar el provider, cuenta 1
+            } else {
+                $total++;
+            }
+        }
+        return $total;
+    }
+
+    /**
+     * Extrae las funciones del fichero: nombre => ['doc' => docblock previo, 'datasets' => nº
+     * de elementos del array devuelto (para providers), o null si no es un return de array].
+     *
+     * @return array<string, array{doc:string, datasets:int|null}>
+     */
+    private function parseFunctions(string $src): array
+    {
+        $tokens = token_get_all($src);
+        $n = count($tokens);
+        $funcs = [];
+        $lastDoc = '';
+        $modifiers = [T_PUBLIC, T_PROTECTED, T_PRIVATE, T_STATIC, T_FINAL, T_ABSTRACT];
+
+        for ($i = 0; $i < $n; $i++) {
+            $t = $tokens[$i];
+            if (is_array($t)) {
+                if ($t[0] === T_DOC_COMMENT) {
+                    $lastDoc = $t[1];
+                    continue;
+                }
+                if ($t[0] === T_WHITESPACE || in_array($t[0], $modifiers, true)) {
+                    continue; // los modificadores van entre el docblock y function: no reinician
+                }
+                if ($t[0] === T_FUNCTION) {
+                    $name = null;
+                    for ($j = $i + 1; $j < $n; $j++) {
+                        if (is_array($tokens[$j]) && $tokens[$j][0] === T_STRING) {
+                            $name = $tokens[$j][1];
+                            $i = $j;
+                            break;
+                        }
+                        if ($tokens[$j] === '(') {
+                            break; // función anónima, sin nombre
+                        }
+                    }
+                    // localizar el cuerpo { ... } (o ; si es abstracto)
+                    $datasets = null;
+                    for ($j = $i + 1; $j < $n; $j++) {
+                        if ($tokens[$j] === '{') {
+                            $datasets = $this->countDatasetsInBody($tokens, $j, $n);
+                            break;
+                        }
+                        if ($tokens[$j] === ';') {
+                            break;
+                        }
+                    }
+                    if ($name !== null) {
+                        $funcs[$name] = ['doc' => $lastDoc, 'datasets' => $datasets];
+                    }
+                    $lastDoc = '';
+                    continue;
+                }
+                $lastDoc = ''; // cualquier otro token de código: el docblock ya no es de una función
+            } else {
+                if ($t === '{' || $t === '}' || $t === ';') {
+                    $lastDoc = '';
+                }
+            }
+        }
+        return $funcs;
+    }
+
+    /**
+     * Dado el índice del '{' que abre el cuerpo de una función, devuelve el nº de casos que
+     * aportaría como dataProvider: nº de yields, o nº de elementos de primer nivel del array
+     * que devuelve. null si el return no es un array literal (no contable estáticamente).
+     */
+    private function countDatasetsInBody(array $tokens, int $bodyStart, int $n): ?int
+    {
+        // localizar el '}' que cierra el cuerpo
+        $depth = 0;
+        $end = $n;
+        for ($j = $bodyStart; $j < $n; $j++) {
+            if ($tokens[$j] === '{') {
+                $depth++;
+            } elseif ($tokens[$j] === '}') {
+                $depth--;
+                if ($depth === 0) {
+                    $end = $j;
+                    break;
+                }
+            }
+        }
+
+        // generador: contar yields
+        $yields = 0;
+        for ($j = $bodyStart; $j < $end; $j++) {
+            if (is_array($tokens[$j])
+                && ($tokens[$j][0] === T_YIELD || (defined('T_YIELD_FROM') && $tokens[$j][0] === T_YIELD_FROM))) {
+                $yields++;
+            }
+        }
+        if ($yields > 0) {
+            return $yields;
+        }
+
+        // primer return con array literal ([...] o array(...))
+        for ($j = $bodyStart; $j < $end; $j++) {
+            if (is_array($tokens[$j]) && $tokens[$j][0] === T_RETURN) {
+                $k = $j + 1;
+                while ($k < $end && is_array($tokens[$k]) && $tokens[$k][0] === T_WHITESPACE) {
+                    $k++;
+                }
+                if ($k < $end && $tokens[$k] === '[') {
+                    return $this->countTopLevelElements($tokens, $k, $end);
+                }
+                if ($k < $end && is_array($tokens[$k]) && $tokens[$k][0] === T_ARRAY) {
+                    $k++;
+                    while ($k < $end && is_array($tokens[$k]) && $tokens[$k][0] === T_WHITESPACE) {
+                        $k++;
+                    }
+                    if ($k < $end && $tokens[$k] === '(') {
+                        return $this->countTopLevelElements($tokens, $k, $end);
+                    }
+                }
+                return null; // return de algo que no es un array literal
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Cuenta los elementos de primer nivel de un array literal cuyo paréntesis/corchete de
+     * apertura está en $openIdx. Cuenta comas al nivel 1 de anidamiento (los arrays internos,
+     * al aumentar la profundidad, no cuentan) y suma 1 si hay contenido tras la última coma.
+     */
+    private function countTopLevelElements(array $tokens, int $openIdx, int $end): int
+    {
+        $depth = 0;
+        $commas = 0;
+        $sawContent = false;
+        for ($j = $openIdx; $j < $end; $j++) {
+            $tk = $tokens[$j];
+            if ($tk === '[' || $tk === '(' || $tk === '{') {
+                if ($depth === 1) {
+                    $sawContent = true; // el elemento actual es un array/llamada anidada
+                }
+                $depth++;
+                continue;
+            }
+            if ($tk === ']' || $tk === ')' || $tk === '}') {
+                $depth--;
+                if ($depth === 0) {
+                    break;
+                }
+                continue;
+            }
+            if ($depth !== 1) {
+                continue;
+            }
+            if ($tk === ',') {
+                $commas++;
+                $sawContent = false;
+                continue;
+            }
+            if (is_array($tk)) {
+                if ($tk[0] !== T_WHITESPACE && $tk[0] !== T_COMMENT && $tk[0] !== T_DOC_COMMENT) {
+                    $sawContent = true;
+                }
+            } else {
+                $sawContent = true;
+            }
+        }
+        return $commas + ($sawContent ? 1 : 0);
     }
 
     /**
@@ -145,7 +336,7 @@ class TestScanner
                         'desc' => $doc['class'],
                         'methods' => $doc['methods'],
                     ];
-                    $tests += count($doc['methods']);
+                    $tests += $this->countTests($subPath . '/' . $file); // cuenta casos (con dataProviders)
                 }
 
                 $depsFile = $subPath . '/install-plugins.txt';
