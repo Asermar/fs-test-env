@@ -110,7 +110,16 @@ body {
     justify-content: space-between;
     gap: 1rem;
 }
-.test-info { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.test-info { display: flex; align-items: center; gap: 0.6rem; min-width: 0; cursor: pointer; }
+.card-caret {
+    color: var(--muted);
+    font-size: 0.8rem;
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+}
+.test-card.collapsed .card-caret { transform: rotate(-90deg); }
+.test-card-body { display: flex; flex-direction: column; gap: 0.7rem; min-width: 0; }
+.test-card.collapsed .test-card-body { display: none; }
 .test-icon { font-size: 1.05rem; }
 .test-file {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -231,6 +240,7 @@ button.ghost:hover { color: var(--accent); }
     margin-bottom: 1rem;
 }
 .content-head h2 { margin: 0; font-size: 1.15rem; }
+.head-actions { display: flex; gap: 0.6rem; align-items: center; margin-left: auto; }
 
 .summary {
     display: flex;

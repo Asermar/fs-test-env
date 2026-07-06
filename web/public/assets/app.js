@@ -109,17 +109,20 @@ function renderPluginView(p) {
     content.innerHTML = '';
 
     const runAllBtn = el('button', { class: 'primary', text: 'Ejecutar todos' });
+    const clearBtn = el('button', { class: 'ghost', text: '🧹 Limpiar' });
     content.appendChild(el('div', { class: 'content-head' }, [
         el('h2', {}, [
             p.isCore ? el('span', { class: 'core-mark', text: '⚙ ' }) : null,
             p.plugin,
             p.version ? el('span', { class: 'plugin-ver', text: ' (' + p.version + ')' }) : null
         ]),
-        runAllBtn
+        el('div', { class: 'head-actions' }, [clearBtn, runAllBtn])
     ]));
 
     // closures que "Ejecutar todos" lanza en secuencia.
     const runners = [];
+    // todos los paneles de resultados del view, para poder limpiarlos de golpe.
+    const slots = [];
 
     // registro de resultados por unidad ejecutada, para el contador del lateral.
     // - fichero de plugin  -> clave "sub/fichero"
@@ -150,6 +153,7 @@ function renderPluginView(p) {
         let subSlot = null;
         if (p.isCore) {
             subSlot = makeSlot('Test/' + s.sub);
+            slots.push(subSlot);
             const folderPath = 'Test/' + s.sub;
             const runFolder = async (btn) => {
                 const data = await runCoreTests(folderPath, btn, subSlot);
@@ -169,6 +173,7 @@ function renderPluginView(p) {
             const actions = [runBtn];
             // cada tarjeta (fichero) tiene su propio panel desplegable de resultados.
             const cardSlot = makeSlot(p.isCore ? f.path : p.plugin + '/' + s.sub + '/' + f.name);
+            slots.push(cardSlot);
 
             if (p.isCore) {
                 const runFile = async (btn) => {
@@ -191,16 +196,20 @@ function renderPluginView(p) {
                 actions.unshift(srcBtn);
             }
 
+            // caret para plegar/desplegar la tarjeta (oculta descripción, métodos y resultado).
+            const caret = el('span', { class: 'card-caret', text: '▾' });
+            const info = el('div', { class: 'test-info' }, [
+                caret,
+                el('span', { class: 'test-icon', text: '🧪' }),
+                el('span', { class: 'test-file', text: f.name })
+            ]);
             const top = el('div', { class: 'test-card-top' }, [
-                el('div', { class: 'test-info' }, [
-                    el('span', { class: 'test-icon', text: '🧪' }),
-                    el('span', { class: 'test-file', text: f.name })
-                ]),
+                info,
                 el('div', { class: 'test-actions' }, actions)
             ]);
 
-            const cardChildren = [top];
-            if (f.desc) cardChildren.push(mdBox('test-desc', f.desc));
+            const bodyChildren = [];
+            if (f.desc) bodyChildren.push(mdBox('test-desc', f.desc));
             if (f.methods && f.methods.length) {
                 const list = el('div', { class: 'method-list' });
                 for (const m of f.methods) {
@@ -210,10 +219,18 @@ function renderPluginView(p) {
                     if (m.desc) item.appendChild(mdBox('method-desc', m.desc));
                     list.appendChild(item);
                 }
-                cardChildren.push(list);
+                bodyChildren.push(list);
             }
-            if (cardSlot) cardChildren.push(cardSlot.details);
-            cards.push(el('div', { class: 'test-card' }, cardChildren));
+            bodyChildren.push(cardSlot.details);
+
+            const card = el('div', { class: 'test-card' }, [
+                top,
+                el('div', { class: 'test-card-body' }, bodyChildren)
+            ]);
+            cardSlot.card = card; // para poder desplegar la tarjeta al ejecutar
+            // pulsar en la zona del nombre pliega/despliega la tarjeta (los botones no).
+            info.addEventListener('click', () => card.classList.toggle('collapsed'));
+            cards.push(card);
         }
         appendCards(block, cards); // pagina si hay más de PAGE_SIZE tarjetas
 
@@ -231,6 +248,18 @@ function renderPluginView(p) {
             }
             runAllBtn.disabled = false;
         })();
+    });
+
+    // Limpiar: oculta y vacía todos los paneles de resultados y reinicia el contador.
+    clearBtn.addEventListener('click', () => {
+        for (const slot of slots) {
+            slot.details.hidden = true;
+            slot.details.open = false;
+            slot.body.innerHTML = '';
+            setSlotBadge(slot, '', '');
+        }
+        p._runTotals = {};
+        updatePluginBadge(p);
     });
 }
 
@@ -304,6 +333,7 @@ function setSlotBadge(slot, text, kind) {
 
 // abre el panel, lo vacía y muestra el spinner mientras corre.
 function slotStart(slot, label) {
+    if (slot.card) slot.card.classList.remove('collapsed'); // despliega la tarjeta al ejecutar
     slot.details.hidden = false;
     slot.details.open = true;
     slot.body.innerHTML = '';
@@ -326,6 +356,7 @@ function slotDone(slot, data) {
 
 // --- view source (se despliega dentro de la tarjeta) ---
 async function viewSource(plugin, sub, file, slot) {
+    if (slot.card) slot.card.classList.remove('collapsed');
     slot.details.hidden = false;
     slot.details.open = true;
     slot.body.innerHTML = '';
