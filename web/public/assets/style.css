@@ -88,7 +88,18 @@ body {
 
 .sub-list { padding: 0 0.8rem 0.6rem; }
 .sub-block { margin-top: 1rem; }
-.sub-name { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem; }
+.sub-name {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.5rem;
+}
+/* el botón "carpeta" no hereda el uppercase/espaciado de la etiqueta de carpeta */
+.sub-name button { text-transform: none; letter-spacing: normal; }
 
 /* Tarjeta por fichero de test */
 .test-card {
@@ -353,6 +364,14 @@ details.raw summary { cursor: pointer; color: var(--muted); }
     color: #f3b0a8;
     border-radius: 6px;
     padding: 0.8rem;
+}
+
+/* pie de página con el botón "volver arriba" */
+.pagefoot {
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+    padding: 0.9rem;
+    text-align: center;
 }
 
 /* versión del plugin junto al nombre, y tag del core en la cabecera */

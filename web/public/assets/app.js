@@ -551,3 +551,9 @@ function renderCase(c) {
 }
 
 renderSidebar();
+
+// botón "volver arriba" del pie
+const toTop = document.getElementById('toTop');
+if (toTop) {
+    toTop.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+}

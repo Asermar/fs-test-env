@@ -53,7 +53,15 @@ class TestScanner
             $abs = $file->getPathname();
             $rel = ltrim(str_replace($this->fsDir, '', $abs), '/');      // Test/Core/Model/XTest.php
             $group = str_replace($this->fsDir . '/Test/', '', dirname($abs)); // Core, Core/Model...
-            $groups[$group][] = ['name' => $file->getFilename(), 'path' => $rel, 'tests' => $this->countTests($abs)];
+            $doc = TestDoc::forFile($abs);
+            $groups[$group][] = [
+                'name' => $file->getFilename(),
+                'path' => $rel,
+                'title' => $doc['classTitle'] ?? null,
+                'desc' => $doc['class'],
+                'methods' => $doc['methods'],
+                'tests' => $this->countTests($abs),
+            ];
         }
         ksort($groups);
 

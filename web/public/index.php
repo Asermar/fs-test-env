@@ -147,6 +147,10 @@ function render_page(array $plugins, string $coreRef): void
         </section>
     </main>
 
+    <footer class="pagefoot">
+        <button id="toTop" class="ghost" type="button">↑ Volver arriba</button>
+    </footer>
+
     <script>window.__PLUGINS__ = <?= $data ?>;</script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/php.min.js"></script>
