@@ -75,6 +75,11 @@ Variables principales (ver `config.env.example`): `FS_CORE_DIR` (layout del core
 `TESTENV_REPO_PATH` (ruta absoluta idéntica host/contenedor), `TEST_DB`, `CORE_REPO`/`CORE_BRANCH`,
 `FS_LANG`/`FS_TIMEZONE`, `TEST_WEB_TITLE`, y las de contenedor/red/proxy (`TESTENV_*`).
 
+**Versión del core (`CORE_BRANCH`)**: acepta una **rama** o un **tag** de versión. Si se deja
+vacío, el provisionador usa el **tag de la versión instalada** (`v<Kernel::version()>`, p.ej.
+`v2026.3`), con fallback a `master`. El provisionador interactivo (`setup-test-env.sh`) ofrece,
+además de la instalada, las **5 versiones (tags) más recientes** del repo de origen.
+
 ## Ejecutar los tests
 
 - Web: el host configurado en `TESTENV_HOST` (runner navegable).

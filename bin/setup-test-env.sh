@@ -32,6 +32,7 @@ TEST_WEB_URL="${TEST_WEB_URL:-}"
 # Usamos SSH (igual que los submódulos del proyecto) para reutilizar la clave
 # SSH y evitar que git pida credenciales HTTPS de GitHub.
 CORE_REPO="${CORE_REPO:-git@github.com:NeoRazorX/facturascripts.git}"
+. "$SCRIPT_DIR/branch-helpers.sh"
 
 # --- dependencias de sistema ---
 for bin in git composer php; do
@@ -81,9 +82,30 @@ DB_PORT="$(cfg FS_DB_PORT)"
 DB_USER="$(cfg FS_DB_USER)"
 DB_WORK="$(cfg FS_DB_NAME)"
 
-# --- 1) rama del core (interactivo) ---
-read -rp "Rama del core de FacturaScripts a usar [master]: " CORE_BRANCH
-CORE_BRANCH="${CORE_BRANCH:-master}"
+# --- 1) versión/rama del core (interactivo) ---
+INSTALLED_VER="$(fs_installed_version 2>/dev/null || true)"
+DEFAULT_REF="$(fs_default_ref)"
+[ -n "$INSTALLED_VER" ] && echo "Versión de FacturaScripts instalada: $INSTALLED_VER"
+
+# opciones: la referencia por defecto (instalada) primero, luego las 5 tags recientes.
+REF_OPTIONS=("$DEFAULT_REF")
+while IFS= read -r t; do
+    [ -n "$t" ] && [ "$t" != "$DEFAULT_REF" ] && REF_OPTIONS+=("$t")
+done < <(fs_recent_tags)
+
+echo "Versión/rama del core a usar:"
+for i in "${!REF_OPTIONS[@]}"; do
+    tag=""; [ "${REF_OPTIONS[$i]}" = "$DEFAULT_REF" ] && tag="  (instalada / por defecto)"
+    printf "  %d) %s%s\n" "$((i + 1))" "${REF_OPTIONS[$i]}" "$tag"
+done
+read -rp "Elige número, Enter para la opción 1, o escribe una rama/tag: " REF_SEL
+if [ -z "$REF_SEL" ]; then
+    CORE_BRANCH="${REF_OPTIONS[0]}"
+elif [[ "$REF_SEL" =~ ^[0-9]+$ ]] && [ "$REF_SEL" -ge 1 ] && [ "$REF_SEL" -le "${#REF_OPTIONS[@]}" ]; then
+    CORE_BRANCH="${REF_OPTIONS[$((REF_SEL - 1))]}"
+else
+    CORE_BRANCH="$REF_SEL"
+fi
 
 # --- 2) BD de pruebas (interactivo) ---
 DEF_TEST_DB="${TEST_DB:-fs_test}"

@@ -39,7 +39,10 @@ PLUGINS_SRC="$CORE_ROOT/Plugins"
 TESTENV_DIR="${TESTENV_DIR:-$FS_PROJECT_ROOT/test-env/facturascripts}"
 
 CORE_REPO="${CORE_REPO:-https://github.com/NeoRazorX/facturascripts.git}"
-CORE_BRANCH="${CORE_BRANCH:-master}"
+# rama o tag del core; vacío/no definido => el tag de la versión instalada (v<Kernel::version()>),
+# con fallback a master. Ver bin/branch-helpers.sh.
+. "$SCRIPT_DIR/branch-helpers.sh"
+CORE_BRANCH="${CORE_BRANCH:-$(fs_default_ref)}"
 TEST_DB="${TEST_DB:-fs_test}"
 FS_LANG="${FS_LANG:-es_ES}"
 FS_TIMEZONE="${FS_TIMEZONE:-UTC}"
@@ -81,9 +84,12 @@ if command -v git >/dev/null 2>&1; then
         # revertimos también install-plugins.php (lo regeneramos más abajo) para que
         # el pull --ff-only no falle por cambios locales sobre un archivo del core.
         git -C "$TESTENV_DIR" checkout -- Test/install-plugins.php 2>/dev/null || true
-        git -C "$TESTENV_DIR" fetch --quiet origin
-        git -C "$TESTENV_DIR" checkout "$CORE_BRANCH"
-        git -C "$TESTENV_DIR" pull --ff-only origin "$CORE_BRANCH"
+        git -C "$TESTENV_DIR" fetch --quiet --tags origin
+        git -C "$TESTENV_DIR" checkout --quiet "$CORE_BRANCH"
+        # solo actualizamos si CORE_BRANCH es una rama; los tags son inmutables.
+        if git -C "$TESTENV_DIR" show-ref --verify --quiet "refs/remotes/origin/$CORE_BRANCH"; then
+            git -C "$TESTENV_DIR" pull --ff-only origin "$CORE_BRANCH"
+        fi
     else
         echo ">> Clonando core..."
         mkdir -p "$(dirname "$TESTENV_DIR")"
