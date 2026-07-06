@@ -51,16 +51,24 @@ switch ($action) {
             json_out(['ok' => false, 'error' => 'Método no permitido.']);
         }
         $runner = new TestRunner($base);
-        $result = $runner->run(
-            (string)($_POST['plugin'] ?? ''),
-            (string)($_POST['sub'] ?? '')
-        );
+        if (!empty($_POST['core'])) {
+            $result = $runner->runCore((string)($_POST['path'] ?? ''));
+        } else {
+            $result = $runner->run(
+                (string)($_POST['plugin'] ?? ''),
+                (string)($_POST['sub'] ?? '')
+            );
+        }
         json_out($result);
         break;
 
     default:
         $scanner = new TestScanner($base);
         $plugins = $scanner->plugins();
+        $core = $scanner->core();
+        if (($core['total'] ?? 0) > 0) {
+            array_unshift($plugins, $core); // la sección Core va primero
+        }
         render_page($plugins, core_ref($base));
         break;
 }

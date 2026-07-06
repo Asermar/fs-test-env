@@ -74,6 +74,9 @@ body {
 }
 .plugin-item.active { border-color: var(--accent); }
 .plugin-item.active > .plugin-head { color: var(--accent); }
+/* la sección del core se distingue con un borde izquierdo y su icono */
+.plugin-item.is-core { border-left: 3px solid var(--accent); }
+.core-mark { color: var(--accent); }
 
 .sub-list { padding: 0 0.8rem 0.6rem; }
 .sub-block { margin-top: 1rem; }

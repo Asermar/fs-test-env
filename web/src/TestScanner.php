@@ -15,12 +15,54 @@ class TestScanner
 {
     /** @var string Ruta a la carpeta Plugins del proyecto. */
     private $pluginsDir;
+    /** @var string Raíz del core de pruebas (test-env/facturascripts). */
+    private $fsDir;
 
     public function __construct(string $baseDir)
     {
         // layout del core dentro del proyecto (Mesa_FS usa 'src'; FS estándar '.').
         $coreDir = getenv('FS_CORE_DIR') ?: 'src';
         $this->pluginsDir = $baseDir . '/' . $coreDir . '/Plugins';
+        $this->fsDir = getenv('TESTENV_DIR') ?: $baseDir . '/test-env/facturascripts';
+    }
+
+    /**
+     * Tests propios del CORE de FacturaScripts, tomados de Test/Core del entorno de pruebas.
+     * Devuelve una entrada análoga a un plugin pero con isCore=true y, en cada fichero, su
+     * 'path' relativo a la raíz del core (para poder ejecutarlo). Agrupa por carpeta.
+     *
+     * @return array<string, mixed>|null  null si el entorno no está provisionado
+     */
+    public function core(): array
+    {
+        $testDir = $this->fsDir . '/Test/Core';
+        $result = ['plugin' => 'FacturaScripts Core', 'isCore' => true, 'subs' => [], 'total' => 0];
+        if (!is_dir($testDir)) {
+            return $result;
+        }
+
+        // agrupamos los *Test.php por carpeta (relativa a Test/), p.ej. Core, Core/Model, Core/Lib.
+        $groups = [];
+        $it = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($testDir, \FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($it as $file) {
+            if (substr($file->getFilename(), -8) !== 'Test.php') {
+                continue;
+            }
+            $abs = $file->getPathname();
+            $rel = ltrim(str_replace($this->fsDir, '', $abs), '/');      // Test/Core/Model/XTest.php
+            $group = str_replace($this->fsDir . '/Test/', '', dirname($abs)); // Core, Core/Model...
+            $groups[$group][] = ['name' => $file->getFilename(), 'path' => $rel];
+        }
+        ksort($groups);
+
+        foreach ($groups as $group => $files) {
+            usort($files, static fn($a, $b) => strcmp($a['name'], $b['name']));
+            $result['subs'][] = ['sub' => $group, 'deps' => '', 'files' => $files];
+            $result['total'] += count($files);
+        }
+        return $result;
     }
 
     /**

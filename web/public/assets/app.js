@@ -60,12 +60,13 @@ function renderSidebar() {
     for (const p of PLUGINS) {
         const head = el('div', { class: 'plugin-head' }, [
             el('span', {}, [
+                p.isCore ? el('span', { class: 'core-mark', text: '⚙ ' }) : null,
                 p.plugin,
                 p.version ? el('span', { class: 'plugin-ver', text: ' (' + p.version + ')' }) : null
             ]),
             el('span', { class: 'badge', text: String(p.total) })
         ]);
-        const item = el('div', { class: 'plugin-item' }, [head]);
+        const item = el('div', { class: 'plugin-item' + (p.isCore ? ' is-core' : '') }, [head]);
         head.addEventListener('click', () => selectPlugin(p, item));
         sidebar.appendChild(item);
         if (!firstItem) { firstItem = item; firstPlugin = p; }
@@ -97,28 +98,37 @@ function renderPluginView(p) {
 
     for (const s of p.subs) {
         const block = el('div', { class: 'sub-block' });
-        block.appendChild(el('div', { class: 'sub-name', text: s.sub + (s.deps ? ' · deps: ' + s.deps.replace(/\s+/g, ', ') : '') }));
+        const subHead = el('div', { class: 'sub-name', text: s.sub + (s.deps ? ' · deps: ' + s.deps.replace(/\s+/g, ', ') : '') });
+        if (p.isCore) {
+            const folderBtn = el('button', { class: 'ghost', text: '▶ carpeta' });
+            const folderPath = 'Test/' + s.sub;
+            folderBtn.addEventListener('click', () => runCoreTests(folderPath, folderBtn, results));
+            subHead.appendChild(folderBtn);
+        }
+        block.appendChild(subHead);
+
         for (const f of s.files) {
             const runBtn = el('button', { class: 'run', text: '▶ Ejecutar' });
-            runBtn.addEventListener('click', () => runTests(p.plugin, s.sub, runBtn, results));
-            const srcBtn = el('button', { class: 'ghost', text: '</> Ver código' });
-            srcBtn.addEventListener('click', () => viewSource(p.plugin, s.sub, f.name));
+            const actions = [runBtn];
+            if (p.isCore) {
+                runBtn.addEventListener('click', () => runCoreTests(f.path, runBtn, results));
+            } else {
+                runBtn.addEventListener('click', () => runTests(p.plugin, s.sub, runBtn, results));
+                const srcBtn = el('button', { class: 'ghost', text: '</> Ver código' });
+                srcBtn.addEventListener('click', () => viewSource(p.plugin, s.sub, f.name));
+                actions.unshift(srcBtn);
+            }
 
-            // fila superior: nombre del test + acciones
             const top = el('div', { class: 'test-card-top' }, [
                 el('div', { class: 'test-info' }, [
                     el('span', { class: 'test-icon', text: '🧪' }),
                     el('span', { class: 'test-file', text: f.name })
                 ]),
-                el('div', { class: 'test-actions' }, [srcBtn, runBtn])
+                el('div', { class: 'test-actions' }, actions)
             ]);
 
             const cardChildren = [top];
-
-            // descripción de la clase (markdown -> HTML)
             if (f.desc) cardChildren.push(mdBox('test-desc', f.desc));
-
-            // lista de métodos test*() con su nombre humanizado y su descripción
             if (f.methods && f.methods.length) {
                 const list = el('div', { class: 'method-list' });
                 for (const m of f.methods) {
@@ -130,20 +140,23 @@ function renderPluginView(p) {
                 }
                 cardChildren.push(list);
             }
-
             block.appendChild(el('div', { class: 'test-card' }, cardChildren));
         }
         content.appendChild(block);
     }
 
     runAllBtn.addEventListener('click', () => {
-        // ejecuta cada subcarpeta (normalmente solo "main")
         runAllBtn.disabled = true;
-        const subs = p.subs.map(s => s.sub);
         (async () => {
             results.innerHTML = '';
-            for (const sub of subs) {
-                await runTests(p.plugin, sub, null, results, true);
+            if (p.isCore) {
+                for (const s of p.subs) {
+                    await runCoreTests('Test/' + s.sub, null, results, true);
+                }
+            } else {
+                for (const sub of p.subs.map(s => s.sub)) {
+                    await runTests(p.plugin, sub, null, results, true);
+                }
             }
             runAllBtn.disabled = false;
         })();
@@ -203,10 +216,37 @@ async function runTests(plugin, sub, btn, results, append = false) {
     }
 }
 
+// ejecuta un test del CORE (fichero o carpeta bajo Test/Core); $path relativo a la raíz del core.
+async function runCoreTests(path, btn, results, append = false) {
+    if (btn) btn.disabled = true;
+    if (!append) results.innerHTML = '';
+
+    const loading = el('div', { class: 'suite-title' }, [
+        el('span', { class: 'spinner' }),
+        ' Ejecutando ' + path + ' …'
+    ]);
+    results.appendChild(loading);
+
+    try {
+        const body = new URLSearchParams({ core: '1', path });
+        const res = await fetch('?action=run', { method: 'POST', body });
+        const data = await res.json();
+        loading.remove();
+        if (!data.ok) throw new Error(data.error || 'Error de ejecución');
+        renderResult(data, results);
+    } catch (e) {
+        loading.remove();
+        results.appendChild(el('div', { class: 'error-box', text: 'Error: ' + e.message }));
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
 function renderResult(data, results) {
     const t = data.totals || {};
+    const label = data.sub || data.path || '';
     const summary = el('div', { class: 'summary' }, [
-        el('span', { class: 'chip', text: `${data.sub} · ${t.tests || 0} tests` }),
+        el('span', { class: 'chip', text: `${label} · ${t.tests || 0} tests` }),
         el('span', { class: 'chip pass', text: `${t.pass || 0} OK` }),
         el('span', { class: 'chip fail', text: `${(t.fail || 0) + (t.error || 0)} fallos` }),
         el('span', { class: 'chip skip', text: `${t.skip || 0} omitidos` }),

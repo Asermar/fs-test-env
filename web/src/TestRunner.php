@@ -118,6 +118,67 @@ class TestRunner
     }
 
     /**
+     * Ejecuta un test del CORE de FacturaScripts (fichero o carpeta bajo Test/Core del
+     * entorno de pruebas), sin copiar plugins ni activar nada. $path es relativo a la raíz
+     * del core (p.ej. "Test/Core/Model/ClienteTest.php").
+     *
+     * @return array<string, mixed>
+     */
+    public function runCore(string $path): array
+    {
+        $path = ltrim(str_replace('\\', '/', $path), '/');
+        if ($path === '' || strpos($path, '..') !== false || strpos($path, "\0") !== false
+            || strpos($path, 'Test/Core') !== 0) {
+            return $this->fail('Ruta de test del core no válida.');
+        }
+        if (!file_exists($this->fsDir . '/' . $path)) {
+            return $this->fail('No existe el test del core: ' . $path);
+        }
+        if (!is_file($this->fsDir . '/Core/Kernel.php') || !is_file($this->fsDir . '/config.php')) {
+            return $this->fail('El entorno de pruebas no está provisionado.');
+        }
+        if (!is_file($this->fsDir . '/vendor/bin/phpunit')) {
+            return $this->fail('Falta PHPUnit. Provisiona el entorno (composer install).');
+        }
+
+        // config del runner web (sin stopOnFailure); si no, la estándar del core.
+        $config = is_file($this->fsDir . '/phpunit-webrunner.xml') ? 'phpunit-webrunner.xml' : 'phpunit.xml';
+
+        $lock = fopen(dirname($this->fsDir) . '/.webrunner.lock', 'c');
+        if ($lock === false || !flock($lock, LOCK_EX)) {
+            return $this->fail('No se pudo adquirir el lock de ejecución.');
+        }
+        $junit = tempnam(sys_get_temp_dir(), 'junit_') . '.xml';
+        try {
+            // pasar la ruta como argumento hace que PHPUnit ejecute SOLO ese fichero/carpeta,
+            // ignorando la testsuite del config (que apunta a Test/Plugins).
+            $cmd = 'php ' . escapeshellarg('vendor/bin/phpunit')
+                . ' -c ' . escapeshellarg($config)
+                . ' --log-junit ' . escapeshellarg($junit)
+                . ' ' . escapeshellarg($path);
+            [$exitCode, $stdout, ] = $this->exec($cmd);
+            $junitXml = is_file($junit) ? (string)file_get_contents($junit) : '';
+            $parsed = JUnitParser::parse($junitXml);
+        } finally {
+            @unlink($junit);
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+
+        return [
+            'ok' => true,
+            'core' => true,
+            'path' => $path,
+            'config' => $config,
+            'exitCode' => $exitCode ?? -1,
+            'stdout' => $stdout ?? '',
+            'installLog' => '',
+            'suites' => $parsed['suites'] ?? [],
+            'totals' => $parsed['totals'] ?? [],
+        ];
+    }
+
+    /**
      * Ejecuta un comando dentro de la carpeta del core, capturando stdout+stderr.
      *
      * @return array{0:int,1:string,2:string}
