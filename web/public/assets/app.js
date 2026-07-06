@@ -84,15 +84,16 @@ function renderSidebar() {
 function updatePluginBadge(p) {
     const badge = p._badge;
     if (!badge) return;
+    const total = p.tests != null ? p.tests : p.total; // nº de tests (métodos), no de ficheros
     const totals = p._runTotals || {};
     let pass = 0, fail = 0, any = false;
     for (const k in totals) { any = true; pass += totals[k].pass; fail += totals[k].fail; }
     badge.innerHTML = '';
-    badge.appendChild(el('span', { class: 'badge-total', text: String(p.total) }));
+    badge.appendChild(el('span', { class: 'badge-total', text: String(total) }));
     if (any) {
-        badge.appendChild(el('span', { class: 'badge-pass', text: '✓' + pass }));
+        badge.appendChild(el('span', { class: 'badge-pass', text: '✓' + pass + '/' + total }));
         if (fail > 0) {
-            badge.appendChild(el('span', { class: 'badge-fail', text: '✗' + fail }));
+            badge.appendChild(el('span', { class: 'badge-fail', text: '✗' + fail + '/' + total }));
         }
     }
 }

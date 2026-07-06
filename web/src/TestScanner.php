@@ -36,7 +36,7 @@ class TestScanner
     public function core(): array
     {
         $testDir = $this->fsDir . '/Test/Core';
-        $result = ['plugin' => 'FacturaScripts Core', 'isCore' => true, 'subs' => [], 'total' => 0];
+        $result = ['plugin' => 'FacturaScripts Core', 'isCore' => true, 'subs' => [], 'total' => 0, 'tests' => 0];
         if (!is_dir($testDir)) {
             return $result;
         }
@@ -53,7 +53,7 @@ class TestScanner
             $abs = $file->getPathname();
             $rel = ltrim(str_replace($this->fsDir, '', $abs), '/');      // Test/Core/Model/XTest.php
             $group = str_replace($this->fsDir . '/Test/', '', dirname($abs)); // Core, Core/Model...
-            $groups[$group][] = ['name' => $file->getFilename(), 'path' => $rel];
+            $groups[$group][] = ['name' => $file->getFilename(), 'path' => $rel, 'tests' => $this->countTests($abs)];
         }
         ksort($groups);
 
@@ -61,8 +61,21 @@ class TestScanner
             usort($files, static fn($a, $b) => strcmp($a['name'], $b['name']));
             $result['subs'][] = ['sub' => $group, 'deps' => '', 'files' => $files];
             $result['total'] += count($files);
+            foreach ($files as $f) {
+                $result['tests'] += $f['tests'];
+            }
         }
         return $result;
+    }
+
+    /** Cuenta los métodos test*() de un fichero de test (nº de tests a ejecutar). */
+    private function countTests(string $absPath): int
+    {
+        $src = @file_get_contents($absPath);
+        if ($src === false) {
+            return 0;
+        }
+        return preg_match_all('/function\s+test\w*\s*\(/i', $src);
     }
 
     /**
@@ -100,7 +113,8 @@ class TestScanner
             }
 
             $subs = [];
-            $total = 0;
+            $total = 0;       // nº de ficheros *Test.php
+            $tests = 0;       // nº de métodos test*() (tests reales a ejecutar)
             foreach (scandir($testDir) as $sub) {
                 if ($sub === '.' || $sub === '..') {
                     continue;
@@ -131,6 +145,7 @@ class TestScanner
                         'desc' => $doc['class'],
                         'methods' => $doc['methods'],
                     ];
+                    $tests += count($doc['methods']);
                 }
 
                 $depsFile = $subPath . '/install-plugins.txt';
@@ -153,6 +168,7 @@ class TestScanner
                 'version' => $this->pluginVersion($plugin),
                 'subs' => $subs,
                 'total' => $total,
+                'tests' => $tests,
             ];
         }
 
