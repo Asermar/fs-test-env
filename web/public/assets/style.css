@@ -66,12 +66,21 @@ body {
     font-weight: 600;
 }
 .plugin-item .badge {
+    display: inline-flex;
+    gap: 0.3rem;
+    align-items: center;
+    flex-shrink: 0;
+}
+.plugin-item .badge > span {
     background: var(--border);
     color: var(--muted);
     border-radius: 999px;
     font-size: 0.72rem;
     padding: 0.1rem 0.5rem;
 }
+.plugin-item .badge .badge-pass { background: rgba(46,204,113,0.18); color: var(--green); }
+.plugin-item .badge .badge-fail { background: rgba(231,76,60,0.18); color: var(--red); }
+.plugin-item .badge .badge-fail.zero { background: var(--border); color: var(--muted); }
 .plugin-item.active { border-color: var(--accent); }
 .plugin-item.active > .plugin-head { color: var(--accent); }
 /* la sección del core se distingue con un borde izquierdo y su icono */

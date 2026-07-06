@@ -58,13 +58,17 @@ function renderSidebar() {
     }
     let firstItem = null, firstPlugin = null;
     for (const p of PLUGINS) {
+        const badge = el('span', { class: 'badge' });
+        p._badge = badge;               // referencia para actualizar el contador al ejecutar
+        p._runTotals = {};              // clave de unidad ejecutada -> {pass, fail}
+        updatePluginBadge(p);           // pinta el nº de tests existentes
         const head = el('div', { class: 'plugin-head' }, [
             el('span', {}, [
                 p.isCore ? el('span', { class: 'core-mark', text: '⚙ ' }) : null,
                 p.plugin,
                 p.version ? el('span', { class: 'plugin-ver', text: ' (' + p.version + ')' }) : null
             ]),
-            el('span', { class: 'badge', text: String(p.total) })
+            badge
         ]);
         const item = el('div', { class: 'plugin-item' + (p.isCore ? ' is-core' : '') }, [head]);
         head.addEventListener('click', () => selectPlugin(p, item));
@@ -73,6 +77,22 @@ function renderSidebar() {
     }
     // seleccionamos el primer plugin para que los tests se vean al entrar
     if (firstItem) selectPlugin(firstPlugin, firstItem);
+}
+
+// Pinta el badge del lateral: nº de ficheros de test y, si ya se han ejecutado,
+// el acumulado de casos pasados (✓) y fallados (✗) de las unidades ejecutadas.
+function updatePluginBadge(p) {
+    const badge = p._badge;
+    if (!badge) return;
+    const totals = p._runTotals || {};
+    let pass = 0, fail = 0, any = false;
+    for (const k in totals) { any = true; pass += totals[k].pass; fail += totals[k].fail; }
+    badge.innerHTML = '';
+    badge.appendChild(el('span', { class: 'badge-total', text: String(p.total) }));
+    if (any) {
+        badge.appendChild(el('span', { class: 'badge-pass', text: '✓' + pass }));
+        badge.appendChild(el('span', { class: 'badge-fail' + (fail ? '' : ' zero'), text: '✗' + fail }));
+    }
 }
 
 function selectPlugin(p, item) {
@@ -95,8 +115,26 @@ function renderPluginView(p) {
         runAllBtn
     ]));
 
-    // closures que "Ejecutar todos" lanza en secuencia (una por carpeta).
+    // closures que "Ejecutar todos" lanza en secuencia.
     const runners = [];
+
+    // registro de resultados por unidad ejecutada, para el contador del lateral.
+    // - fichero de plugin  -> clave "sub/fichero"
+    // - fichero de core    -> clave = su path (Test/Core/.../XTest.php)
+    // - carpeta de core    -> clave = "Test/<sub>"
+    // Para no contar doble en el core, ejecutar una carpeta olvida los ficheros
+    // de esa carpeta y ejecutar un fichero olvida el registro de su carpeta.
+    const record = (key, data) => {
+        if (!data) return;
+        const t = data.totals || {};
+        p._runTotals[key] = { pass: t.pass || 0, fail: (t.fail || 0) + (t.error || 0) };
+        updatePluginBadge(p);
+    };
+    const forget = (pred) => {
+        for (const k of Object.keys(p._runTotals)) {
+            if (pred(k)) delete p._runTotals[k];
+        }
+    };
 
     for (const s of p.subs) {
         const block = el('div', { class: 'sub-block' });
@@ -110,10 +148,15 @@ function renderPluginView(p) {
         if (p.isCore) {
             subSlot = makeSlot('Test/' + s.sub);
             const folderPath = 'Test/' + s.sub;
+            const runFolder = async (btn) => {
+                const data = await runCoreTests(folderPath, btn, subSlot);
+                forget(k => k.indexOf(folderPath + '/') === 0); // olvida ficheros de esta carpeta
+                record(folderPath, data);
+            };
             const folderBtn = el('button', { class: 'ghost', text: '▶ carpeta' });
-            folderBtn.addEventListener('click', () => runCoreTests(folderPath, folderBtn, subSlot));
+            folderBtn.addEventListener('click', () => runFolder(folderBtn));
             subHead.appendChild(folderBtn);
-            runners.push(() => runCoreTests(folderPath, null, subSlot));
+            runners.push(() => runFolder(null));
         }
         block.appendChild(subHead);
 
@@ -125,11 +168,20 @@ function renderPluginView(p) {
             const cardSlot = makeSlot(p.isCore ? f.path : p.plugin + '/' + s.sub + '/' + f.name);
 
             if (p.isCore) {
-                runBtn.addEventListener('click', () => runCoreTests(f.path, runBtn, cardSlot));
+                const runFile = async (btn) => {
+                    const data = await runCoreTests(f.path, btn, cardSlot);
+                    forget(k => k === 'Test/' + s.sub); // olvida el registro de su carpeta
+                    record(f.path, data);
+                };
+                runBtn.addEventListener('click', () => runFile(runBtn));
             } else {
                 // plugin: "Ejecutar" lanza SOLO este fichero -> resultado dentro de su tarjeta.
-                runBtn.addEventListener('click', () => runTests(p.plugin, s.sub, f.name, runBtn, cardSlot));
-                runners.push(() => runTests(p.plugin, s.sub, f.name, null, cardSlot));
+                const runFile = async (btn) => {
+                    const data = await runTests(p.plugin, s.sub, f.name, btn, cardSlot);
+                    record(s.sub + '/' + f.name, data);
+                };
+                runBtn.addEventListener('click', () => runFile(runBtn));
+                runners.push(() => runFile(null));
                 // "Ver código" se despliega en el mismo panel de la tarjeta.
                 const srcBtn = el('button', { class: 'ghost', text: '</> Ver código' });
                 srcBtn.addEventListener('click', () => viewSource(p.plugin, s.sub, f.name, cardSlot));
@@ -306,10 +358,12 @@ async function runTests(plugin, sub, file, btn, slot) {
         if (!data.ok) throw new Error(data.error || 'Error de ejecución');
         renderResult(data, slot.body);
         slotDone(slot, data);
+        return data;
     } catch (e) {
         slot.body.innerHTML = '';
         setSlotBadge(slot, 'error', 'fail');
         slot.body.appendChild(el('div', { class: 'error-box', text: 'Error: ' + e.message }));
+        return null;
     } finally {
         if (btn) btn.disabled = false;
     }
@@ -327,10 +381,12 @@ async function runCoreTests(path, btn, slot) {
         if (!data.ok) throw new Error(data.error || 'Error de ejecución');
         renderResult(data, slot.body);
         slotDone(slot, data);
+        return data;
     } catch (e) {
         slot.body.innerHTML = '';
         setSlotBadge(slot, 'error', 'fail');
         slot.body.appendChild(el('div', { class: 'error-box', text: 'Error: ' + e.message }));
+        return null;
     } finally {
         if (btn) btn.disabled = false;
     }
