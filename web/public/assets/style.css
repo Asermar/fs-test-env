@@ -164,6 +164,9 @@ body {
     color: var(--accent);
 }
 .method-desc { color: var(--muted); font-size: 0.85rem; margin-top: 0.25rem; }
+/* resultado del test bajo su método (oculto si no se ha ejecutado) */
+.method-result { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem; }
+.method-result:empty { display: none; margin: 0; }
 
 /* Descripción del método bajo cada caso en los resultados */
 .case-desc {

@@ -216,6 +216,7 @@ function renderPluginView(p) {
 
             const bodyChildren = [];
             if (f.desc) bodyChildren.push(mdBox('test-desc', f.desc));
+            const methodResults = {}; // nombre de método -> contenedor de su resultado
             if (f.methods && f.methods.length) {
                 const list = el('div', { class: 'method-list' });
                 for (const m of f.methods) {
@@ -223,10 +224,15 @@ function renderPluginView(p) {
                         el('div', { class: 'method-title', text: m.title, title: m.name })
                     ]);
                     if (m.desc) item.appendChild(mdBox('method-desc', m.desc));
+                    const res = el('div', { class: 'method-result' }); // resultado bajo el método
+                    item.appendChild(res);
+                    methodResults[m.name] = res;
                     list.appendChild(item);
                 }
                 bodyChildren.push(list);
             }
+            // si hay métodos, los resultados se reparten bajo cada uno; el panel queda de resumen.
+            cardSlot.methodResults = Object.keys(methodResults).length ? methodResults : null;
             bodyChildren.push(cardSlot.details);
 
             const card = el('div', { class: 'test-card collapsed' }, [
@@ -262,6 +268,9 @@ function renderPluginView(p) {
             slot.details.hidden = true;
             slot.details.open = false;
             slot.body.innerHTML = '';
+            if (slot.methodResults) {
+                for (const k in slot.methodResults) slot.methodResults[k].innerHTML = '';
+            }
             setSlotBadge(slot, '', '');
         }
         p._runTotals = {};
@@ -343,6 +352,9 @@ function slotStart(slot, label) {
     slot.details.hidden = false;
     slot.details.open = true;
     slot.body.innerHTML = '';
+    if (slot.methodResults) {
+        for (const k in slot.methodResults) slot.methodResults[k].innerHTML = '';
+    }
     setSlotBadge(slot, 'ejecutando…', 'running');
     slot.body.appendChild(el('div', { class: 'suite-title' }, [
         el('span', { class: 'spinner' }), ' Ejecutando ' + label + ' …'
@@ -394,9 +406,8 @@ async function runTests(plugin, sub, file, btn, slot) {
         const body = new URLSearchParams({ plugin, sub, file: file || '' });
         const res = await fetch('?action=run', { method: 'POST', body });
         const data = await res.json();
-        slot.body.innerHTML = '';
-        if (!data.ok) throw new Error(data.error || 'Error de ejecución');
-        renderResult(data, slot.body);
+        if (!data.ok) { slot.body.innerHTML = ''; throw new Error(data.error || 'Error de ejecución'); }
+        showResult(slot, data);
         slotDone(slot, data);
         return data;
     } catch (e) {
@@ -417,9 +428,8 @@ async function runCoreTests(path, btn, slot) {
         const body = new URLSearchParams({ core: '1', path });
         const res = await fetch('?action=run', { method: 'POST', body });
         const data = await res.json();
-        slot.body.innerHTML = '';
-        if (!data.ok) throw new Error(data.error || 'Error de ejecución');
-        renderResult(data, slot.body);
+        if (!data.ok) { slot.body.innerHTML = ''; throw new Error(data.error || 'Error de ejecución'); }
+        showResult(slot, data);
         slotDone(slot, data);
         return data;
     } catch (e) {
@@ -432,10 +442,47 @@ async function runCoreTests(path, btn, slot) {
     }
 }
 
-function renderResult(data, results) {
+// Pinta el resultado en el panel del slot. Si el slot tiene mapa de métodos
+// (slot.methodResults), coloca cada caso bajo la sección de su método en la tarjeta,
+// y en el panel deja solo el resumen + casos sin método + salida cruda.
+function showResult(slot, data) {
+    slot.body.innerHTML = '';
+    if (slot.methodResults) {
+        for (const k in slot.methodResults) {
+            slot.methodResults[k].innerHTML = '';
+        }
+        const extras = [];
+        for (const suite of data.suites || []) {
+            for (const c of suite.cases) {
+                const target = slot.methodResults[caseMethodName(c.name)] || slot.methodResults[c.name];
+                if (target) {
+                    target.appendChild(renderCase(c));
+                } else {
+                    extras.push(c);
+                }
+            }
+        }
+        slot.body.appendChild(resultSummary(data));
+        if (extras.length) {
+            slot.body.appendChild(el('div', { class: 'suite-title', text: 'Otros casos' }));
+            extras.forEach(c => slot.body.appendChild(renderCase(c)));
+        }
+        slot.body.appendChild(rawOutput(data));
+    } else {
+        renderResult(data, slot.body);
+    }
+}
+
+// nombre del método a partir del nombre del caso ("testX with data set #0 (...)" -> "testX").
+function caseMethodName(name) {
+    const m = /^([A-Za-z_]\w*)/.exec(name || '');
+    return m ? m[1] : name;
+}
+
+function resultSummary(data) {
     const t = data.totals || {};
     const label = data.file || data.path || data.sub || '';
-    const summary = el('div', { class: 'summary' }, [
+    return el('div', { class: 'summary' }, [
         el('span', { class: 'chip', text: `${label} · ${t.tests || 0} tests` }),
         el('span', { class: 'chip pass', text: `${t.pass || 0} OK` }),
         el('span', { class: 'chip fail', text: `${(t.fail || 0) + (t.error || 0)} fallos` }),
@@ -443,7 +490,17 @@ function renderResult(data, results) {
         el('span', { class: 'chip', text: `${t.assertions || 0} aserciones` }),
         el('span', { class: 'chip', text: fmtTime(t.time || 0) })
     ]);
-    results.appendChild(summary);
+}
+
+function rawOutput(data) {
+    return el('details', { class: 'raw' }, [
+        el('summary', { text: 'Salida cruda de PHPUnit' }),
+        el('pre', {}, [el('code', { text: (data.installLog ? data.installLog + '\n\n' : '') + (data.stdout || '') })])
+    ]);
+}
+
+function renderResult(data, results) {
+    results.appendChild(resultSummary(data));
 
     if ((data.suites || []).length === 0) {
         results.appendChild(el('div', { class: 'error-box' }, [
@@ -458,12 +515,7 @@ function renderResult(data, results) {
         }
     }
 
-    // salida cruda colapsable
-    const raw = el('details', { class: 'raw' }, [
-        el('summary', { text: 'Salida cruda de PHPUnit' }),
-        el('pre', {}, [el('code', { text: (data.installLog ? data.installLog + '\n\n' : '') + (data.stdout || '') })])
-    ]);
-    results.appendChild(raw);
+    results.appendChild(rawOutput(data));
 }
 
 function renderCase(c) {
