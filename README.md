@@ -35,13 +35,28 @@ git submodule add git@github.com:Asermar/fs-test-env.git test-bin
 test-bin/bin/init-project.sh
 #    -> crea .fs-test-env.env  y  .fs-test-env/{test.conf,service.yaml}
 
-# 3) integrar en tu compose el servicio de .fs-test-env/service.yaml
+# 3) integrar en tu compose el servicio de .fs-test-env/service.yaml y levantarlo
+#    podman-compose up -d <servicio>     # si CONTAINER_ENGINE=podman
+#    docker compose up -d <servicio>     # si CONTAINER_ENGINE=docker
 #    (monta .fs-test-env/test.conf como sitio apache del contenedor)
 
 # 4) provisionar el entorno
 test-bin/bin/setup-test-env.sh          # en el host (interactivo)
 #    o dejar que el contenedor lo haga al arrancar (TESTENV_AUTO_PROVISION=1)
 ```
+
+### Podman o Docker
+
+`init-project.sh` pregunta el motor (`CONTAINER_ENGINE`, def. `podman`) y renderiza el
+servicio desde la plantilla correspondiente:
+
+- **podman**: incluye `userns_mode: keep-id` y el sysctl de puertos no privilegiados
+  (necesarios en podman rootless para ligar el 80).
+- **docker**: sin esas claves (el contenedor arranca como root y liga el 80). En Docker
+  rootful, si los ficheros que el contenedor escribe en `test-env/` te dan problemas de
+  permisos, ejecuta el servicio con `user: "UID:GID"` de tu usuario.
+
+El resto del servicio (red, volúmenes, comando de provisión, labels de traefik) es idéntico.
 
 ## Configuración
 

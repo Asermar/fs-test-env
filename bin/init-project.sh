@@ -61,6 +61,12 @@ ask TESTENV_NETWORK        "Red compose" "default"
 ask TESTENV_TRAEFIK_ROUTER "Nombre del router traefik" "fs-testenv"
 ask TESTENV_RUN_USER       "Usuario apache dentro del contenedor" "www-data"
 ask TESTENV_DB_SERVICE     "Servicio de BD del compose (depends_on)" "db"
+ask CONTAINER_ENGINE       "Motor de contenedores (podman | docker)" "podman"
+
+case "$CONTAINER_ENGINE" in
+    podman|docker) ;;
+    *) echo "ERROR: CONTAINER_ENGINE debe ser 'podman' o 'docker' (dado: '$CONTAINER_ENGINE')." >&2; exit 1 ;;
+esac
 
 # TESTENV_DIR concreto para rendes (vacío -> default)
 TESTENV_DIR="${TESTENV_DIR:-$FS_PROJECT_ROOT/test-env/facturascripts}"
@@ -89,6 +95,7 @@ TESTENV_NETWORK="$TESTENV_NETWORK"
 TESTENV_TRAEFIK_ROUTER="$TESTENV_TRAEFIK_ROUTER"
 TESTENV_RUN_USER="$TESTENV_RUN_USER"
 TESTENV_DB_SERVICE="$TESTENV_DB_SERVICE"
+CONTAINER_ENGINE="$CONTAINER_ENGINE"
 EOF
 umask 022
 echo "   escrito $ENV_FILE"
@@ -114,24 +121,34 @@ render() {  # render <plantilla>
         "$1"
 }
 
+SERVICE_TMPL="$SUBMODULE_DIR/templates/testenv.service.$CONTAINER_ENGINE.tmpl.yaml"
+[ -f "$SERVICE_TMPL" ] || { echo "ERROR: no existe la plantilla $SERVICE_TMPL" >&2; exit 1; }
+
 mkdir -p "$OUT_DIR"
-render "$SUBMODULE_DIR/templates/test.conf.tmpl"          > "$OUT_DIR/test.conf"
-render "$SUBMODULE_DIR/templates/testenv.service.tmpl.yaml" > "$OUT_DIR/service.yaml"
+render "$SUBMODULE_DIR/templates/test.conf.tmpl" > "$OUT_DIR/test.conf"
+render "$SERVICE_TMPL"                            > "$OUT_DIR/service.yaml"
 echo "   renderizado $OUT_DIR/test.conf"
-echo "   renderizado $OUT_DIR/service.yaml"
+echo "   renderizado $OUT_DIR/service.yaml  (motor: $CONTAINER_ENGINE)"
+
+if [ "$CONTAINER_ENGINE" = "docker" ]; then
+    UP_CMD="docker compose up -d $TESTENV_SERVICE"
+else
+    UP_CMD="podman-compose up -d $TESTENV_SERVICE"
+fi
 
 cat <<EOF
 
 ================================================================
-Entorno de test configurado.
+Entorno de test configurado (motor: $CONTAINER_ENGINE).
 
 1) Añade a .gitignore del proyecto (si no quieres versionar la config local):
      .fs-test-env
      .fs-test-env.env
 
-2) Pega el servicio de $OUT_DIR/service.yaml en tu compose (podman/docker).
-   Monta el vhost $OUT_DIR/test.conf en el contenedor (ya referenciado en el
-   servicio: ./.fs-test-env/test.conf -> /etc/apache2/sites-enabled/test.conf).
+2) Pega el servicio de $OUT_DIR/service.yaml en tu compose y levántalo:
+     $UP_CMD
+   El vhost $OUT_DIR/test.conf ya está referenciado en el servicio
+   (./.fs-test-env/test.conf -> /etc/apache2/sites-enabled/test.conf).
 
 3) Provisiona el entorno:
      - en el host:      test-bin/bin/setup-test-env.sh   (interactivo)
