@@ -17,9 +17,9 @@ require __DIR__ . '/../src/TestRunner.php';
 use TestWeb\TestScanner;
 use TestWeb\TestRunner;
 
-// raíz del repo: la app vive en podman/test/app/public, así que subimos 4 niveles
-// (public -> app -> test -> podman -> raíz del repo).
-$base = dirname(__DIR__, 4);
+// raíz del proyecto FacturaScripts. La app vive en test-bin/web/public, así que
+// subimos 3 niveles (public -> web -> test-bin -> raíz). Override con FS_PROJECT_ROOT.
+$base = getenv('FS_PROJECT_ROOT') ?: dirname(__DIR__, 3);
 
 $action = $_GET['action'] ?? '';
 
@@ -73,20 +73,21 @@ function render_page(array $plugins): void
     $data = json_encode($plugins, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     $totalTests = array_sum(array_map(static fn($p) => $p['total'], $plugins));
     $nPlugins = count($plugins);
+    $title = getenv('TEST_WEB_TITLE') ?: 'Tests de plugins';
     ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Tests de plugins · Mesa FS</title>
+    <title><?= htmlspecialchars($title, ENT_QUOTES) ?></title>
     <link rel="stylesheet" href="assets/style.css?v=<?= @filemtime(__DIR__ . '/assets/style.css') ?>">
     <link rel="stylesheet"
           href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 </head>
 <body>
     <header class="topbar">
-        <h1>Tests de plugins</h1>
+        <h1><?= htmlspecialchars($title, ENT_QUOTES) ?></h1>
         <div class="meta"><?= $nPlugins ?> plugins · <?= $totalTests ?> ficheros de test</div>
     </header>
 

@@ -1,0 +1,50 @@
+# Servicio compose del entorno de test (plantilla de fs-test-env).
+# init-project.sh sustituye los @@PLACEHOLDER@@ con los valores de .fs-test-env.env.
+# Pega el resultado como un servicio más de tu podman-compose.yaml / docker-compose.yaml.
+#
+# Requisito de diseño: el repo se monta DENTRO del contenedor en su MISMA ruta absoluta
+# que en el host (@@TESTENV_REPO_PATH@@), para que los symlinks de plugins y las rutas
+# que resuelve PHPUnit funcionen igual dentro y fuera.
+  @@TESTENV_SERVICE@@:
+    image: @@TESTENV_IMAGE@@
+    container_name: @@TESTENV_CONTAINER@@
+    restart: unless-stopped
+    # depends_on opcional: el servicio de BD de tu proyecto (si lo hay en este compose).
+    # depends_on:
+    #   - @@TESTENV_DB_SERVICE@@
+    userns_mode: keep-id
+    sysctls:
+      - net.ipv4.ip_unprivileged_port_start=0
+    networks:
+      @@TESTENV_NETWORK@@:
+        aliases:
+          - @@TESTENV_HOST@@
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - @@TESTENV_REPO_PATH@@:@@TESTENV_REPO_PATH@@
+      - ./.fs-test-env/test.conf:/etc/apache2/sites-enabled/test.conf:ro
+    environment:
+      TZ: @@FS_TIMEZONE@@
+      APACHE_RUN_USER: @@TESTENV_RUN_USER@@
+      APACHE_RUN_GROUP: @@TESTENV_RUN_USER@@
+      TESTENV_AUTO_PROVISION: "1"
+      CORE_BRANCH: @@CORE_BRANCH@@
+    command:
+      - /bin/bash
+      - -c
+      - >-
+        if [ "${TESTENV_AUTO_PROVISION:-1}" = "1" ]; then
+        @@TESTENV_REPO_PATH@@/test-bin/bin/test-env-provision.sh || echo "WARN: provisión del entorno de pruebas fallida; arranco igualmente.";
+        fi;
+        exec apache2-foreground
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.@@TESTENV_TRAEFIK_ROUTER@@.rule=Host(`@@TESTENV_HOST@@`)
+      - traefik.http.routers.@@TESTENV_TRAEFIK_ROUTER@@.entrypoints=web
+      - traefik.http.services.@@TESTENV_TRAEFIK_ROUTER@@.loadbalancer.server.port=80
+      - traefik.http.routers.@@TESTENV_TRAEFIK_ROUTER@@-tls.rule=Host(`@@TESTENV_HOST@@`)
+      - traefik.http.routers.@@TESTENV_TRAEFIK_ROUTER@@-tls.entrypoints=websecure
+      - traefik.http.routers.@@TESTENV_TRAEFIK_ROUTER@@-tls.tls=true
+      - traefik.http.routers.@@TESTENV_TRAEFIK_ROUTER@@-tls.tls.certresolver=cloudflare
+      - traefik.http.routers.@@TESTENV_TRAEFIK_ROUTER@@-tls.service=@@TESTENV_TRAEFIK_ROUTER@@

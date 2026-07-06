@@ -13,12 +13,14 @@ require_once __DIR__ . '/TestDoc.php';
 
 class TestScanner
 {
-    /** @var string Ruta a src/Plugins del repo. */
+    /** @var string Ruta a la carpeta Plugins del proyecto. */
     private $pluginsDir;
 
     public function __construct(string $baseDir)
     {
-        $this->pluginsDir = $baseDir . '/src/Plugins';
+        // layout del core dentro del proyecto (Mesa_FS usa 'src'; FS estándar '.').
+        $coreDir = getenv('FS_CORE_DIR') ?: 'src';
+        $this->pluginsDir = $baseDir . '/' . $coreDir . '/Plugins';
     }
 
     /**

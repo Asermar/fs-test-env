@@ -20,14 +20,29 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC_CONFIG="$ROOT/src/config.php"
-PLUGINS_SRC="$ROOT/src/Plugins"
-TESTENV_DIR="$ROOT/test-env/facturascripts"
+# Directorio de este script (test-bin/bin).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Raíz del proyecto FacturaScripts: por defecto el padre de test-bin/ (submódulo).
+# Sobreescribible con FS_PROJECT_ROOT para despliegues no estándar.
+FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+
+# Config del despliegue (generada por bin/init-project.sh). Sin valores hardcodeados:
+# lo que no venga por entorno ni por este fichero cae en los defaults genéricos.
+[ -f "$FS_PROJECT_ROOT/.fs-test-env.env" ] && . "$FS_PROJECT_ROOT/.fs-test-env.env"
+
+# Layout del core dentro del proyecto (Mesa_FS usa 'src'; FS estándar usaría '.').
+FS_CORE_DIR="${FS_CORE_DIR:-src}"
+CORE_ROOT="$FS_PROJECT_ROOT/$FS_CORE_DIR"
+SRC_CONFIG="$CORE_ROOT/config.php"
+PLUGINS_SRC="$CORE_ROOT/Plugins"
+TESTENV_DIR="${TESTENV_DIR:-$FS_PROJECT_ROOT/test-env/facturascripts}"
 
 CORE_REPO="${CORE_REPO:-https://github.com/NeoRazorX/facturascripts.git}"
 CORE_BRANCH="${CORE_BRANCH:-master}"
-TEST_DB="${TEST_DB:-mesafs_test}"
+TEST_DB="${TEST_DB:-fs_test}"
+FS_LANG="${FS_LANG:-es_ES}"
+FS_TIMEZONE="${FS_TIMEZONE:-UTC}"
 
 # --- dependencias de sistema ---
 # git es OPCIONAL: en el contenedor podman la imagen no lo trae, pero el core ya
@@ -112,8 +127,8 @@ define('FS_DB_FOREIGN_KEYS', true);
 define('FS_DB_TYPE_CHECK', true);
 define('FS_MYSQL_CHARSET', 'utf8mb4');
 define('FS_MYSQL_COLLATE', 'utf8mb4_unicode_520_ci');
-define('FS_LANG', 'es_ES');
-define('FS_TIMEZONE', 'Atlantic/Canary');
+define('FS_LANG', '$FS_LANG');
+define('FS_TIMEZONE', '$FS_TIMEZONE');
 define('FS_DB_TYPE', 'mysql');
 define('FS_DB_HOST', '$DB_HOST');
 define('FS_DB_PORT', '$DB_PORT');
@@ -142,7 +157,7 @@ fi
 # Ordenamos respetando las dependencias declaradas en 'require' (e incluimos las
 # deps transitivas): Plugins::enable() falla si las dependencias no están aún
 # activadas, así que cada una debe ir antes que el plugin que la necesita.
-ENABLE_LIST="$(php "$ROOT/bin/plugin-topo-order.php" "$PLUGINS_SRC" "$ENABLE_LIST")"
+ENABLE_LIST="$(php "$SCRIPT_DIR/plugin-topo-order.php" "$PLUGINS_SRC" "$ENABLE_LIST")"
 echo ">> Plugins a activar (orden por dependencias): $ENABLE_LIST"
 
 mkdir -p "$TESTENV_DIR/Test/Plugins"

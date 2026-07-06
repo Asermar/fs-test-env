@@ -7,21 +7,28 @@
 # Este script es el FRONT INTERACTIVO para uso en el host:
 #   1. Comprueba dependencias y extensiones PHP (ofrece instalarlas con sudo).
 #   2. Pregunta la rama del core, la BD de pruebas y los plugins a activar.
-#   3. Delega la provisión real en bin/test-env-provision.sh (no interactivo),
-#      que también usa el contenedor podman 'test.mesafs' al arrancar.
+#   3. Delega la provisión real en test-env-provision.sh (no interactivo), que es
+#      el mismo que arranca el contenedor podman del entorno de test.
 #
-# Variables opcionales (override):
+# La configuración del despliegue se lee de <proyecto>/.fs-test-env.env (generado
+# por init-project.sh); las variables aquí solo sirven de override puntual.
 #   CORE_REPO   repositorio del core por SSH
 #               (def: git@github.com:NeoRazorX/facturascripts.git)
 # =============================================================================
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC_CONFIG="$ROOT/src/config.php"
-PLUGINS_SRC="$ROOT/src/Plugins"
-TESTENV_DIR="$ROOT/test-env/facturascripts"
-PROVISION="$ROOT/bin/test-env-provision.sh"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+[ -f "$FS_PROJECT_ROOT/.fs-test-env.env" ] && . "$FS_PROJECT_ROOT/.fs-test-env.env"
+
+FS_CORE_DIR="${FS_CORE_DIR:-src}"
+CORE_ROOT="$FS_PROJECT_ROOT/$FS_CORE_DIR"
+SRC_CONFIG="$CORE_ROOT/config.php"
+PLUGINS_SRC="$CORE_ROOT/Plugins"
+TESTENV_DIR="${TESTENV_DIR:-$FS_PROJECT_ROOT/test-env/facturascripts}"
+PROVISION="$SCRIPT_DIR/test-env-provision.sh"
+TEST_WEB_URL="${TEST_WEB_URL:-}"
 # Usamos SSH (igual que los submódulos del proyecto) para reutilizar la clave
 # SSH y evitar que git pida credenciales HTTPS de GitHub.
 CORE_REPO="${CORE_REPO:-git@github.com:NeoRazorX/facturascripts.git}"
@@ -79,8 +86,9 @@ read -rp "Rama del core de FacturaScripts a usar [master]: " CORE_BRANCH
 CORE_BRANCH="${CORE_BRANCH:-master}"
 
 # --- 2) BD de pruebas (interactivo) ---
-read -rp "Nombre de la BD de pruebas [mesafs_test]: " TEST_DB
-TEST_DB="${TEST_DB:-mesafs_test}"
+DEF_TEST_DB="${TEST_DB:-fs_test}"
+read -rp "Nombre de la BD de pruebas [$DEF_TEST_DB]: " TEST_DB
+TEST_DB="${TEST_DB:-$DEF_TEST_DB}"
 
 # salvaguarda: nunca la BD de trabajo
 if [ "$TEST_DB" = "$DB_WORK" ]; then
@@ -120,15 +128,18 @@ echo
 echo "================================================================"
 echo "Entorno de pruebas listo en: $TESTENV_DIR"
 echo
-echo "Ejecuta los tests de forma navegable en la web:"
-echo "  https://test.mesafs.asermar.com  (contenedor podman 'test.mesafs')"
-echo
+EX_PLUGIN="${LINKED[0]:-MiPlugin}"
+if [ -n "$TEST_WEB_URL" ]; then
+    echo "Ejecuta los tests de forma navegable en la web:"
+    echo "  $TEST_WEB_URL"
+    echo
+fi
 echo "O desde la línea de comandos, por ejemplo:"
 echo "  cd $TESTENV_DIR"
-echo "  vendor/bin/phpunit Plugins/Alias/Test"
+echo "  vendor/bin/phpunit Plugins/$EX_PLUGIN/Test"
 echo
 echo "O con fsmaker (desde la carpeta del plugin):"
-echo "  cd $TESTENV_DIR/Plugins/Alias"
+echo "  cd $TESTENV_DIR/Plugins/$EX_PLUGIN"
 echo "  fsmaker run-tests $TESTENV_DIR"
 echo
 echo "  NOTA: pásale la RUTA ABSOLUTA del entorno de pruebas (no '../..')."

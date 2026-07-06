@@ -1,0 +1,2 @@
+# Este repo solo contiene el TOOLING del entorno de test; no artefactos generados.
+*.log

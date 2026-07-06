@@ -19,11 +19,14 @@ class TestRunner
     private $baseDir;
     /** @var string */
     private $fsDir;
+    /** @var string Layout del core dentro del proyecto (Mesa_FS 'src'; FS estándar '.'). */
+    private $coreDir;
 
     public function __construct(string $baseDir)
     {
         $this->baseDir = $baseDir;
-        $this->fsDir = $baseDir . '/test-env/facturascripts';
+        $this->coreDir = getenv('FS_CORE_DIR') ?: 'src';
+        $this->fsDir = getenv('TESTENV_DIR') ?: $baseDir . '/test-env/facturascripts';
     }
 
     /**
@@ -35,7 +38,7 @@ class TestRunner
             return $this->fail('Parámetros no válidos.');
         }
 
-        $srcTest = $this->baseDir . '/src/Plugins/' . $plugin . '/Test/' . $sub;
+        $srcTest = $this->baseDir . '/' . $this->coreDir . '/Plugins/' . $plugin . '/Test/' . $sub;
         if (!is_dir($srcTest)) {
             return $this->fail('No existe la carpeta de tests: ' . $srcTest);
         }
@@ -53,7 +56,7 @@ class TestRunner
             : 'phpunit-plugins.xml';
 
         // --- lock (serializa ejecuciones) ---
-        $lockPath = $this->baseDir . '/test-env/.webrunner.lock';
+        $lockPath = dirname($this->fsDir) . '/.webrunner.lock';
         $lock = fopen($lockPath, 'c');
         if ($lock === false || !flock($lock, LOCK_EX)) {
             return $this->fail('No se pudo adquirir el lock de ejecución.');

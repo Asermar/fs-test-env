@@ -1,14 +1,20 @@
 <VirtualHost *:80>
-    ServerName test.mesafs.asermar.com
+    ServerName @@TESTENV_HOST@@
     ServerAdmin webmaster@localhost
 
-    # La app del runner de tests (versionada en el repo). El repo se monta dentro
-    # del contenedor en su MISMA ruta absoluta que en el host, para que los
-    # symlinks de los plugins y las rutas que resuelve PHPUnit funcionen igual.
-    DocumentRoot /home/alexis/Dev/Mesa_FS/podman/test/app/public
+    # App del runner de tests, servida desde el submódulo fs-test-env (test-bin/web).
+    # El repo se monta dentro del contenedor en su MISMA ruta absoluta que en el host,
+    # para que los symlinks de los plugins y las rutas que resuelve PHPUnit funcionen igual.
+    DocumentRoot @@TESTENV_REPO_PATH@@/test-bin/web/public
     DirectoryIndex index.php
 
-    <Directory /home/alexis/Dev/Mesa_FS/podman/test/app/public>
+    # Exponemos a PHP la configuración del despliegue (leída por el runner web).
+    SetEnv FS_PROJECT_ROOT "@@TESTENV_REPO_PATH@@"
+    SetEnv FS_CORE_DIR "@@FS_CORE_DIR@@"
+    SetEnv TESTENV_DIR "@@TESTENV_DIR@@"
+    SetEnv TEST_WEB_TITLE "@@TEST_WEB_TITLE@@"
+
+    <Directory @@TESTENV_REPO_PATH@@/test-bin/web/public>
         Options -Indexes +FollowSymLinks
         AllowOverride None
         Require all granted
