@@ -160,7 +160,8 @@ function renderPluginView(p) {
                 forget(k => k.indexOf(folderPath + '/') === 0); // olvida ficheros de esta carpeta
                 record(folderPath, data);
             };
-            const folderBtn = el('button', { class: 'ghost', text: '▶ carpeta' });
+            const folderTests = s.files.reduce((a, f) => a + (f.tests || 0), 0);
+            const folderBtn = el('button', { class: 'ghost', text: `▶ Ejecutar Test en Carpeta (${folderTests})` });
             folderBtn.addEventListener('click', () => runFolder(folderBtn));
             subHead.appendChild(folderBtn);
             runners.push(() => runFolder(null));
@@ -204,6 +205,8 @@ function renderPluginView(p) {
             if (f.title) {
                 titleParts.push(el('span', { class: 'test-filename', text: '(' + f.name + ')' }));
             }
+            const nTests = f.tests != null ? f.tests : (f.methods ? f.methods.length : 0);
+            titleParts.push(el('span', { class: 'test-count', text: nTests + (nTests === 1 ? ' test' : ' tests') }));
             const info = el('div', { class: 'test-info' }, [
                 caret,
                 el('span', { class: 'test-icon', text: '🧪' }),

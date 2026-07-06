@@ -339,13 +339,15 @@ class TestScanner
                 $files = [];
                 foreach ($fileNames as $file) {
                     $doc = TestDoc::forFile($subPath . '/' . $file);
+                    $fileTests = $this->countTests($subPath . '/' . $file); // casos (con dataProviders)
                     $files[] = [
                         'name' => $file,
                         'title' => $doc['classTitle'] ?? null,
                         'desc' => $doc['class'],
                         'methods' => $doc['methods'],
+                        'tests' => $fileTests,
                     ];
-                    $tests += $this->countTests($subPath . '/' . $file); // cuenta casos (con dataProviders)
+                    $tests += $fileTests;
                 }
 
                 $depsFile = $subPath . '/install-plugins.txt';
