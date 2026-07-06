@@ -132,9 +132,11 @@ body {
 .test-card-top {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 1rem;
 }
+/* el resultado compacto se separa del nombre; las acciones quedan a la derecha */
+.test-card-top .slot-badge { flex-shrink: 0; }
+.test-card-top .test-actions { margin-left: auto; }
 .test-info { display: flex; align-items: center; gap: 0.6rem; min-width: 0; cursor: pointer; }
 .card-caret {
     color: var(--accent);
@@ -438,6 +440,7 @@ details.raw summary { cursor: pointer; color: var(--muted); }
     padding: 0.1rem 0.45rem;
     white-space: nowrap;
 }
+.slot-badge:empty { display: none; }
 .slot-badge.ok { background: rgba(46,204,113,0.18); color: var(--green); }
 .slot-badge.fail { background: rgba(231,76,60,0.18); color: var(--red); }
 .slot-badge.running { background: var(--panel); color: var(--muted); }

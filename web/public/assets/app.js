@@ -211,9 +211,11 @@ function renderPluginView(p) {
             const runBtn = el('button', { class: 'run', text: '▶ Ejecutar' });
             const actions = [runBtn];
             // cada tarjeta (fichero) tiene su propio panel desplegable de resultados.
-            const cardSlot = makeSlot(p.isCore ? f.path : p.plugin + '/' + s.sub + '/' + f.name);
+            const cardSlot = makeSlot('Resumen y salida de PHPUnit');
             cardSlot.folder = folder;
             slots.push(cardSlot);
+            // el resultado compacto (badge) se muestra en la cabecera, junto al nombre.
+            const headerResult = cardSlot.badge;
 
             if (p.isCore) {
                 const runFile = async (btn) => {
@@ -254,10 +256,12 @@ function renderPluginView(p) {
             ]);
             const top = el('div', { class: 'test-card-top' }, [
                 info,
+                headerResult,
                 el('div', { class: 'test-actions' }, actions)
             ]);
 
-            const bodyChildren = [];
+            // el panel de resumen + salida cruda va justo bajo la cabecera.
+            const bodyChildren = [cardSlot.details];
             if (f.desc) bodyChildren.push(mdBox('test-desc', f.desc));
             const methodResults = {}; // nombre de método -> contenedor de su resultado
             if (f.methods && f.methods.length) {
@@ -276,7 +280,6 @@ function renderPluginView(p) {
             }
             // si hay métodos, los resultados se reparten bajo cada uno; el panel queda de resumen.
             cardSlot.methodResults = Object.keys(methodResults).length ? methodResults : null;
-            bodyChildren.push(cardSlot.details);
 
             const card = el('div', { class: 'test-card collapsed' }, [
                 top,
