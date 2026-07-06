@@ -91,7 +91,9 @@ function updatePluginBadge(p) {
     badge.appendChild(el('span', { class: 'badge-total', text: String(p.total) }));
     if (any) {
         badge.appendChild(el('span', { class: 'badge-pass', text: '✓' + pass }));
-        badge.appendChild(el('span', { class: 'badge-fail' + (fail ? '' : ' zero'), text: '✗' + fail }));
+        if (fail > 0) {
+            badge.appendChild(el('span', { class: 'badge-fail', text: '✗' + fail }));
+        }
     }
 }
 
