@@ -35,6 +35,32 @@ body {
 .topbar h1 { font-size: 1.1rem; margin: 0; }
 .topbar .meta { color: var(--muted); font-size: 0.85rem; }
 
+/* aviso "Ejecutando…" en la cabecera (solo visible mientras se trabaja) */
+.running-indicator { display: none; align-items: center; gap: 0.4rem; color: var(--accent); font-weight: 600; font-size: 0.85rem; }
+body.busy .running-indicator { display: inline-flex; }
+
+/* barra de progreso indeterminada fija en la parte superior mientras se trabaja */
+.busybar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    z-index: 50;
+    overflow: hidden;
+    display: none;
+}
+body.busy .busybar { display: block; }
+.busybar::before {
+    content: '';
+    position: absolute;
+    top: 0; height: 100%; width: 35%;
+    background: var(--accent);
+    animation: busyslide 1.1s ease-in-out infinite;
+}
+@keyframes busyslide {
+    0% { left: -35%; }
+    100% { left: 100%; }
+}
+
 #app {
     display: grid;
     grid-template-columns: 320px 1fr;

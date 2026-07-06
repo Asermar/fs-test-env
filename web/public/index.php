@@ -131,8 +131,10 @@ function render_page(array $plugins, string $coreRef): void
           href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 </head>
 <body>
+    <div id="busybar" class="busybar" aria-hidden="true"></div>
     <header class="topbar">
         <h1><?= htmlspecialchars($title, ENT_QUOTES) ?></h1>
+        <span id="running" class="running-indicator"><span class="spinner"></span> Ejecutando…</span>
         <div class="meta">
             <?= $nPlugins ?> plugins · <?= $totalTests ?> ficheros de test<?php if ($coreRef !== ''): ?>
             · core <span class="core-ref"><?= htmlspecialchars($coreRef, ENT_QUOTES) ?></span><?php endif ?><?php if ($envVersion !== ''): ?>

@@ -4,6 +4,17 @@ const PLUGINS = window.__PLUGINS__ || [];
 const sidebar = document.getElementById('sidebar');
 const content = document.getElementById('content');
 
+// --- indicador global de "trabajando" (barra superior + aviso en la cabecera) ---
+let busyCount = 0;
+function busyInc() {
+    busyCount++;
+    document.body.classList.add('busy');
+}
+function busyDec() {
+    busyCount = Math.max(0, busyCount - 1);
+    if (busyCount === 0) document.body.classList.remove('busy');
+}
+
 // --- helpers ---
 function el(tag, attrs = {}, children = []) {
     const node = document.createElement(tag);
@@ -200,10 +211,15 @@ function renderPluginView(p) {
         } else {
             folderBtn.addEventListener('click', async () => {
                 folderBtn.disabled = true;
-                for (const r of subRunners) {
-                    await r();
+                busyInc();
+                try {
+                    for (const r of subRunners) {
+                        await r();
+                    }
+                } finally {
+                    busyDec();
+                    folderBtn.disabled = false;
                 }
-                folderBtn.disabled = false;
             });
         }
         block.appendChild(subHead);
@@ -301,11 +317,16 @@ function renderPluginView(p) {
 
     runAllBtn.addEventListener('click', () => {
         runAllBtn.disabled = true;
+        busyInc();
         (async () => {
-            for (const run of runners) {
-                await run();
+            try {
+                for (const run of runners) {
+                    await run();
+                }
+            } finally {
+                busyDec();
+                runAllBtn.disabled = false;
             }
-            runAllBtn.disabled = false;
         })();
     });
 
@@ -432,6 +453,7 @@ async function viewSource(plugin, sub, file, slot) {
     pre.appendChild(code);
     slot.body.appendChild(pre);
 
+    busyInc();
     try {
         const url = `?action=source&plugin=${encodeURIComponent(plugin)}&sub=${encodeURIComponent(sub)}&file=${encodeURIComponent(file)}`;
         const res = await fetch(url);
@@ -443,12 +465,15 @@ async function viewSource(plugin, sub, file, slot) {
         slot.body.innerHTML = '';
         setSlotBadge(slot, 'error', 'fail');
         slot.body.appendChild(el('div', { class: 'error-box', text: 'No se pudo cargar el código: ' + e.message }));
+    } finally {
+        busyDec();
     }
 }
 
 // --- run (plugin: un fichero de test concreto de la carpeta) ---
 async function runTests(plugin, sub, file, btn, slot) {
     if (btn) btn.disabled = true;
+    busyInc();
     slotStart(slot, plugin + '/' + sub + (file ? '/' + file : ''));
     try {
         const body = new URLSearchParams({ plugin, sub, file: file || '' });
@@ -465,12 +490,14 @@ async function runTests(plugin, sub, file, btn, slot) {
         return null;
     } finally {
         if (btn) btn.disabled = false;
+        busyDec();
     }
 }
 
 // ejecuta un test del CORE (fichero o carpeta bajo Test/Core); path relativo a la raíz del core.
 async function runCoreTests(path, btn, slot) {
     if (btn) btn.disabled = true;
+    busyInc();
     slotStart(slot, path);
     try {
         const body = new URLSearchParams({ core: '1', path });
@@ -487,6 +514,7 @@ async function runCoreTests(path, btn, slot) {
         return null;
     } finally {
         if (btn) btn.disabled = false;
+        busyDec();
     }
 }
 
