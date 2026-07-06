@@ -105,6 +105,15 @@ body {
     letter-spacing: normal;
 }
 .sub-actions { display: flex; gap: 0.5rem; align-items: center; margin-left: auto; }
+/* caret "expandir/colapsar carpeta" delante del nombre */
+.folder-toggle {
+    padding: 0.1rem 0.45rem;
+    line-height: 1;
+    flex-shrink: 0;
+}
+.folder-caret { color: var(--accent); font-size: 1rem; }
+/* cuerpo de la carpeta (tarjetas + panel); se oculta al colapsar la carpeta */
+.sub-body.collapsed { display: none; }
 
 /* Tarjeta por fichero de test */
 .test-card {

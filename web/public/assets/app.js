@@ -148,19 +148,38 @@ function renderPluginView(p) {
         const subRunners = [];            // runners por fichero de esta carpeta (plugins)
         const folderTests = s.files.reduce((a, f) => a + (f.tests || 0), 0);
 
-        // botón verde para ejecutar toda la carpeta y botón para colapsar/expandir.
+        // cuerpo de la carpeta (tarjetas + panel de carpeta), que el caret muestra u oculta.
+        const subBody = el('div', { class: 'sub-body' });
+        const folder = {
+            expand() {
+                subBody.classList.remove('collapsed');
+                folderCaret.textContent = '▾';
+            }
+        };
+
+        // caret "expandir/colapsar carpeta", delante del nombre: oculta o muestra las tarjetas.
+        const folderCaret = el('span', { class: 'folder-caret', text: '▾' });
+        const folderToggle = el('button', { class: 'ghost folder-toggle', title: 'Expandir/colapsar carpeta' }, [folderCaret]);
+        folderToggle.addEventListener('click', () => {
+            const collapsed = subBody.classList.toggle('collapsed');
+            folderCaret.textContent = collapsed ? '▸' : '▾';
+        });
+
+        // botón verde para ejecutar toda la carpeta y botón para expandir/colapsar las tarjetas.
         const folderBtn = el('button', { class: 'run', text: `▶ Ejecutar Test en Carpeta (${folderTests})` });
-        const toggleBtn = el('button', { class: 'ghost', text: '⊕ Expandir' });
+        const toggleBtn = el('button', { class: 'ghost', text: '⊕ Expandir Tests' });
         const subHead = el('div', { class: 'sub-name' }, [
+            folderToggle,
             el('span', { text: s.sub + (s.deps ? ' · deps: ' + s.deps.replace(/\s+/g, ', ') : '') }),
             el('div', { class: 'sub-actions' }, [toggleBtn, folderBtn])
         ]);
 
-        // colapsar/expandir todas las tarjetas de la carpeta
+        // expandir/colapsar el contenido de todas las tarjetas de la carpeta
         toggleBtn.addEventListener('click', () => {
+            folder.expand(); // si la carpeta está oculta, la mostramos para ver las tarjetas
             const anyCollapsed = cards.some(c => c.classList.contains('collapsed'));
             cards.forEach(c => c.classList.toggle('collapsed', !anyCollapsed));
-            toggleBtn.textContent = anyCollapsed ? '⊖ Colapsar' : '⊕ Expandir';
+            toggleBtn.textContent = anyCollapsed ? '⊖ Colapsar Tests' : '⊕ Expandir Tests';
         });
 
         // panel de resultados a nivel de carpeta: solo para el core (una única ejecución
@@ -175,6 +194,7 @@ function renderPluginView(p) {
                 forget(k => k.indexOf(folderPath + '/') === 0); // olvida ficheros de esta carpeta
                 record(folderPath, data);
             };
+            subSlot.folder = folder;
             folderBtn.addEventListener('click', () => runFolder(folderBtn));
             runners.push(() => runFolder(null));
         } else {
@@ -192,6 +212,7 @@ function renderPluginView(p) {
             const actions = [runBtn];
             // cada tarjeta (fichero) tiene su propio panel desplegable de resultados.
             const cardSlot = makeSlot(p.isCore ? f.path : p.plugin + '/' + s.sub + '/' + f.name);
+            cardSlot.folder = folder;
             slots.push(cardSlot);
 
             if (p.isCore) {
@@ -266,11 +287,12 @@ function renderPluginView(p) {
             info.addEventListener('click', () => card.classList.toggle('collapsed'));
             cards.push(card);
         }
-        appendCards(block, cards); // pagina si hay más de PAGE_SIZE tarjetas
+        appendCards(subBody, cards); // pagina si hay más de PAGE_SIZE tarjetas
 
         if (subSlot) {
-            block.appendChild(subSlot.details); // resultados de "carpeta" (core), tras las tarjetas
+            subBody.appendChild(subSlot.details); // resultados de "carpeta" (core), tras las tarjetas
         }
+        block.appendChild(subBody);
         content.appendChild(block);
     }
 
@@ -370,6 +392,7 @@ function setSlotBadge(slot, text, kind) {
 
 // abre el panel, lo vacía y muestra el spinner mientras corre.
 function slotStart(slot, label) {
+    if (slot.folder) slot.folder.expand();                  // muestra la carpeta si estaba oculta
     if (slot.card) slot.card.classList.remove('collapsed'); // despliega la tarjeta al ejecutar
     slot.details.hidden = false;
     slot.details.open = true;
