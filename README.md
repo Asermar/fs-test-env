@@ -8,6 +8,16 @@ Pensado para montarse como **submódulo git** (`test-bin/`) en cualquier proyect
 No contiene ningún valor específico de un proyecto: la configuración del despliegue se genera con
 `init-project.sh` en un fichero `.fs-test-env.env` del proyecto.
 
+## Capturas
+
+Listado de tests con la descripción markdown (`@description`) de cada clase y sus métodos:
+
+![Listado de tests](docs/screenshot-list.png)
+
+Resultados de una ejecución (resumen + estado y descripción por caso):
+
+![Resultados de una ejecución](docs/screenshot-results.png)
+
 ## Contenido
 
 - `bin/init-project.sh` — genera `.fs-test-env.env` y renderiza el vhost apache y el servicio
