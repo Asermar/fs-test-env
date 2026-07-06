@@ -112,9 +112,11 @@ body {
 }
 .test-info { display: flex; align-items: center; gap: 0.6rem; min-width: 0; cursor: pointer; }
 .card-caret {
-    color: var(--muted);
-    font-size: 0.8rem;
+    color: var(--accent);
+    font-size: 1.25rem;
+    line-height: 1;
     flex-shrink: 0;
+    margin-right: 0.5rem;
     transition: transform 0.15s ease;
 }
 .test-card.collapsed .card-caret { transform: rotate(-90deg); }
