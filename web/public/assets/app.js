@@ -223,7 +223,7 @@ function renderPluginView(p) {
             }
             bodyChildren.push(cardSlot.details);
 
-            const card = el('div', { class: 'test-card' }, [
+            const card = el('div', { class: 'test-card collapsed' }, [
                 top,
                 el('div', { class: 'test-card-body' }, bodyChildren)
             ]);
