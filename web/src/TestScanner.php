@@ -9,6 +9,8 @@
 
 namespace TestWeb;
 
+require_once __DIR__ . '/TestDoc.php';
+
 class TestScanner
 {
     /** @var string Ruta a src/Plugins del repo. */
@@ -24,7 +26,11 @@ class TestScanner
      *   [
      *     'plugin' => 'Alias',
      *     'subs'   => [
-     *        ['sub' => 'main', 'files' => ['AliasTest.php', ...], 'deps' => 'Alias'],
+     *        ['sub' => 'main', 'deps' => 'Alias', 'files' => [
+     *            ['name' => 'AliasTest.php', 'desc' => '<html>|null', 'methods' => [
+     *                ['name' => 'testX', 'title' => 'X', 'desc' => '<html>|null'],
+     *            ]],
+     *        ]],
      *     ],
      *     'total'  => 1,   // nº total de ficheros *Test.php
      *   ]
@@ -60,16 +66,28 @@ class TestScanner
                     continue;
                 }
 
-                $files = [];
+                $fileNames = [];
                 foreach (scandir($subPath) as $file) {
                     if (substr($file, -8) === 'Test.php') {
-                        $files[] = $file;
+                        $fileNames[] = $file;
                     }
                 }
-                if (empty($files)) {
+                if (empty($fileNames)) {
                     continue;
                 }
-                sort($files);
+                sort($fileNames);
+
+                // enriquecemos cada fichero con su descripción (markdown -> HTML) y las
+                // descripciones de sus métodos test*(), extraídas del propio fichero.
+                $files = [];
+                foreach ($fileNames as $file) {
+                    $doc = TestDoc::forFile($subPath . '/' . $file);
+                    $files[] = [
+                        'name' => $file,
+                        'desc' => $doc['class'],
+                        'methods' => $doc['methods'],
+                    ];
+                }
 
                 $depsFile = $subPath . '/install-plugins.txt';
                 $deps = is_file($depsFile) ? trim((string)file_get_contents($depsFile)) : '';

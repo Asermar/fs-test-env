@@ -82,9 +82,8 @@ body {
 /* Tarjeta por fichero de test */
 .test-card {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
+    flex-direction: column;
+    gap: 0.7rem;
     padding: 0.7rem 0.9rem;
     margin-bottom: 0.6rem;
     border: 1px solid var(--border);
@@ -94,6 +93,12 @@ body {
     transition: border-color 0.15s, transform 0.05s;
 }
 .test-card:hover { border-color: var(--accent); }
+.test-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
 .test-info { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
 .test-icon { font-size: 1.05rem; }
 .test-file {
@@ -105,6 +110,76 @@ body {
     white-space: nowrap;
 }
 .test-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
+
+/* Descripción (markdown) de la clase de test */
+.test-desc {
+    border-top: 1px solid var(--border);
+    padding-top: 0.6rem;
+    color: var(--text);
+    font-size: 0.9rem;
+}
+
+/* Lista de métodos test*() con su descripción */
+.method-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.method-item {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel);
+    padding: 0.5rem 0.7rem;
+}
+.method-title {
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: var(--accent);
+}
+.method-desc { color: var(--muted); font-size: 0.85rem; margin-top: 0.25rem; }
+
+/* Descripción del método bajo cada caso en los resultados */
+.case-desc {
+    padding: 0 0.8rem 0.5rem 0.8rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+/* Estilos del markdown renderizado (Parsedown) */
+.md-body, .test-desc, .method-desc, .case-desc { line-height: 1.5; }
+.test-desc > :first-child,
+.method-desc > :first-child,
+.case-desc > :first-child { margin-top: 0; }
+.test-desc > :last-child,
+.method-desc > :last-child,
+.case-desc > :last-child { margin-bottom: 0; }
+.test-desc h1, .test-desc h2, .test-desc h3, .test-desc h4,
+.case-desc h1, .case-desc h2, .case-desc h3, .case-desc h4 {
+    margin: 0.6rem 0 0.4rem;
+    line-height: 1.2;
+}
+.test-desc h1 { font-size: 1.15rem; }
+.test-desc h2 { font-size: 1.05rem; }
+.test-desc h3, .test-desc h4 { font-size: 0.95rem; }
+.test-desc p, .method-desc p, .case-desc p { margin: 0.4rem 0; }
+.test-desc ul, .test-desc ol,
+.method-desc ul, .method-desc ol,
+.case-desc ul, .case-desc ol { margin: 0.4rem 0; padding-left: 1.3rem; }
+.test-desc li, .method-desc li, .case-desc li { margin: 0.15rem 0; }
+.test-desc code, .method-desc code, .case-desc code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85em;
+    background: #0b0d11;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.05rem 0.3rem;
+}
+.test-desc pre code, .method-desc pre code, .case-desc pre code {
+    border: none; background: none; padding: 0;
+}
+.test-desc a, .method-desc a, .case-desc a { color: var(--accent); }
+.test-desc blockquote, .method-desc blockquote, .case-desc blockquote {
+    margin: 0.4rem 0;
+    padding-left: 0.8rem;
+    border-left: 3px solid var(--border);
+    color: var(--muted);
+}
 
 button {
     font: inherit;

@@ -24,6 +24,32 @@ function fmtTime(s) {
     return ms < 1000 ? ms.toFixed(0) + ' ms' : s.toFixed(2) + ' s';
 }
 
+// Bloque con HTML de markdown ya renderizado en servidor (Parsedown, modo seguro).
+function mdBox(cls, htmlStr) {
+    const node = document.createElement('div');
+    node.className = cls;
+    node.innerHTML = htmlStr;
+    return node;
+}
+
+// Índice claseTest -> { método -> {name,title,desc} } para cruzar los resultados de
+// PHPUnit con las descripciones extraídas de cada fichero de test.
+function buildMethodDesc(plugins) {
+    const map = {};
+    for (const p of plugins) {
+        for (const s of (p.subs || [])) {
+            for (const f of (s.files || [])) {
+                const cls = f.name.replace(/\.php$/, '');
+                const methods = {};
+                for (const m of (f.methods || [])) methods[m.name] = m;
+                map[cls] = methods;
+            }
+        }
+    }
+    return map;
+}
+const METHOD_DESC = buildMethodDesc(PLUGINS);
+
 // --- sidebar ---
 function renderSidebar() {
     if (PLUGINS.length === 0) {
@@ -70,16 +96,36 @@ function renderPluginView(p) {
             const runBtn = el('button', { class: 'run', text: '▶ Ejecutar' });
             runBtn.addEventListener('click', () => runTests(p.plugin, s.sub, runBtn, results));
             const srcBtn = el('button', { class: 'ghost', text: '</> Ver código' });
-            srcBtn.addEventListener('click', () => viewSource(p.plugin, s.sub, f));
+            srcBtn.addEventListener('click', () => viewSource(p.plugin, s.sub, f.name));
 
-            const card = el('div', { class: 'test-card' }, [
+            // fila superior: nombre del test + acciones
+            const top = el('div', { class: 'test-card-top' }, [
                 el('div', { class: 'test-info' }, [
                     el('span', { class: 'test-icon', text: '🧪' }),
-                    el('span', { class: 'test-file', text: f })
+                    el('span', { class: 'test-file', text: f.name })
                 ]),
                 el('div', { class: 'test-actions' }, [srcBtn, runBtn])
             ]);
-            block.appendChild(card);
+
+            const cardChildren = [top];
+
+            // descripción de la clase (markdown -> HTML)
+            if (f.desc) cardChildren.push(mdBox('test-desc', f.desc));
+
+            // lista de métodos test*() con su nombre humanizado y su descripción
+            if (f.methods && f.methods.length) {
+                const list = el('div', { class: 'method-list' });
+                for (const m of f.methods) {
+                    const item = el('div', { class: 'method-item' }, [
+                        el('div', { class: 'method-title', text: m.title, title: m.name })
+                    ]);
+                    if (m.desc) item.appendChild(mdBox('method-desc', m.desc));
+                    list.appendChild(item);
+                }
+                cardChildren.push(list);
+            }
+
+            block.appendChild(el('div', { class: 'test-card' }, cardChildren));
         }
         content.appendChild(block);
     }
@@ -195,6 +241,12 @@ function renderCase(c) {
     ]);
 
     const children = [head];
+
+    // descripción del método (extraída del fichero de test) bajo el nombre del caso
+    const caseClass = (c.class || '').split('\\').pop();
+    const meta = (METHOD_DESC[caseClass] || {})[c.name];
+    if (meta && meta.desc) children.push(mdBox('case-desc', meta.desc));
+
     if (hasDetail) {
         const detail = el('div', { class: 'case-detail' });
         if (c.message) detail.appendChild(el('div', { class: 'msg', text: c.message }));
