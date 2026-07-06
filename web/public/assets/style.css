@@ -303,6 +303,13 @@ button.run {
     box-shadow: 0 1px 0 rgba(0,0,0,0.25);
 }
 button.run:hover { filter: brightness(1.08); border-color: var(--green); }
+/* variante "fichero a fichero": contorno verde, para distinguirla del run agregado */
+button.run.alt {
+    background: transparent;
+    color: var(--green);
+    box-shadow: none;
+}
+button.run.alt:hover { background: rgba(46,204,113,0.12); }
 
 /* Botón secundario (ver código) */
 button.ghost {

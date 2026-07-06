@@ -179,11 +179,26 @@ function renderPluginView(p) {
         // botón verde para ejecutar toda la carpeta y botón para expandir/colapsar las tarjetas.
         const folderBtn = el('button', { class: 'run', text: `▶ Ejecutar Test en Carpeta (${folderTests})` });
         const toggleBtn = el('button', { class: 'ghost', text: '⊕ Expandir Tests' });
+        const subActions = el('div', { class: 'sub-actions' }, [toggleBtn, folderBtn]);
         const subHead = el('div', { class: 'sub-name' }, [
             folderToggle,
             el('span', { text: s.sub + (s.deps ? ' · deps: ' + s.deps.replace(/\s+/g, ', ') : '') }),
-            el('div', { class: 'sub-actions' }, [toggleBtn, folderBtn])
+            subActions
         ]);
+
+        // ejecuta en secuencia los runners por fichero de la carpeta, con indicador global.
+        const runSubRunners = async (btn) => {
+            if (btn) btn.disabled = true;
+            busyInc();
+            try {
+                for (const r of subRunners) {
+                    await r();
+                }
+            } finally {
+                busyDec();
+                if (btn) btn.disabled = false;
+            }
+        };
 
         // expandir/colapsar el contenido de todas las tarjetas de la carpeta
         toggleBtn.addEventListener('click', () => {
@@ -208,19 +223,14 @@ function renderPluginView(p) {
             subSlot.folder = folder;
             folderBtn.addEventListener('click', () => runFolder(folderBtn));
             runners.push(() => runFolder(null));
+
+            // botón alternativo: ejecuta la carpeta del core fichero a fichero, para ver
+            // resultados por tarjeta de forma incremental (más lento, pero da feedback antes).
+            const fileByFileBtn = el('button', { class: 'run alt', text: '▶ Fichero a fichero' });
+            fileByFileBtn.addEventListener('click', () => runSubRunners(fileByFileBtn));
+            subActions.appendChild(fileByFileBtn);
         } else {
-            folderBtn.addEventListener('click', async () => {
-                folderBtn.disabled = true;
-                busyInc();
-                try {
-                    for (const r of subRunners) {
-                        await r();
-                    }
-                } finally {
-                    busyDec();
-                    folderBtn.disabled = false;
-                }
-            });
+            folderBtn.addEventListener('click', () => runSubRunners(folderBtn));
         }
         block.appendChild(subHead);
         for (const f of s.files) {
@@ -240,6 +250,7 @@ function renderPluginView(p) {
                     record(f.path, data);
                 };
                 runBtn.addEventListener('click', () => runFile(runBtn));
+                subRunners.push(() => runFile(null)); // "Fichero a fichero"
             } else {
                 // plugin: "Ejecutar" lanza SOLO este fichero -> resultado dentro de su tarjeta.
                 const runFile = async (btn) => {
