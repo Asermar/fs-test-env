@@ -326,3 +326,72 @@ details.raw summary { cursor: pointer; color: var(--muted); }
 /* versión del plugin junto al nombre, y tag del core en la cabecera */
 .plugin-ver { color: var(--muted); font-weight: 400; font-size: 0.85em; }
 .core-ref { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); }
+
+/* panel de resultados desplegable, junto a cada tarjeta o carpeta */
+.result-slot {
+    margin: 0.5rem 0 0.2rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--panel-2);
+}
+.result-slot .slot-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.5rem 0.7rem;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+.result-slot .slot-summary::-webkit-details-marker { display: none; }
+.slot-caret { color: var(--muted); transition: transform 0.15s ease; }
+.result-slot[open] .slot-caret { transform: rotate(90deg); }
+.slot-title {
+    flex: 1;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.82rem;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.slot-badge {
+    font-size: 0.74rem;
+    font-weight: 600;
+    border-radius: 4px;
+    padding: 0.1rem 0.45rem;
+    white-space: nowrap;
+}
+.slot-badge.ok { background: rgba(46,204,113,0.18); color: var(--green); }
+.slot-badge.fail { background: rgba(231,76,60,0.18); color: var(--red); }
+.slot-badge.running { background: var(--panel); color: var(--muted); }
+.result-slot-body {
+    padding: 0.2rem 0.8rem 0.8rem;
+    border-top: 1px solid var(--border);
+}
+/* dentro del panel, la fila de chips no necesita tanto margen */
+.result-slot-body .summary { margin: 0.7rem 0 0.9rem; }
+.result-slot-body .suite-title:first-child { margin-top: 0.4rem; }
+
+/* paginador de tarjetas (carpetas con más de 10 tests) */
+.pager {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0.6rem 0 0.3rem;
+}
+.pager .pg {
+    min-width: 2rem;
+    padding: 0.25rem 0.55rem;
+    font-size: 0.82rem;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    cursor: pointer;
+}
+.pager .pg:hover:not(:disabled) { border-color: var(--accent); }
+.pager .pg.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.pager .pg:disabled { opacity: 0.4; cursor: default; }
+.pg-count { margin-left: 0.4rem; color: var(--muted); font-size: 0.8rem; }

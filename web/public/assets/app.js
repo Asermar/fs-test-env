@@ -88,34 +88,55 @@ function renderPluginView(p) {
     const runAllBtn = el('button', { class: 'primary', text: 'Ejecutar todos' });
     content.appendChild(el('div', { class: 'content-head' }, [
         el('h2', {}, [
+            p.isCore ? el('span', { class: 'core-mark', text: '⚙ ' }) : null,
             p.plugin,
             p.version ? el('span', { class: 'plugin-ver', text: ' (' + p.version + ')' }) : null
         ]),
         runAllBtn
     ]));
 
-    const results = el('div', { id: 'results' });
+    // closures que "Ejecutar todos" lanza en secuencia (una por carpeta).
+    const runners = [];
 
     for (const s of p.subs) {
         const block = el('div', { class: 'sub-block' });
-        const subHead = el('div', { class: 'sub-name', text: s.sub + (s.deps ? ' · deps: ' + s.deps.replace(/\s+/g, ', ') : '') });
+        const subHead = el('div', { class: 'sub-name' }, [
+            el('span', { text: s.sub + (s.deps ? ' · deps: ' + s.deps.replace(/\s+/g, ', ') : '') })
+        ]);
+
+        // panel de resultados a nivel de carpeta: se coloca TRAS las tarjetas.
+        // - plugin: el "Ejecutar" de cada tarjeta lanza toda la carpeta -> aquí.
+        // - core: lo usa el botón "carpeta".
+        const subSlot = makeSlot(p.isCore ? 'Test/' + s.sub : p.plugin + '/' + s.sub);
+
         if (p.isCore) {
-            const folderBtn = el('button', { class: 'ghost', text: '▶ carpeta' });
             const folderPath = 'Test/' + s.sub;
-            folderBtn.addEventListener('click', () => runCoreTests(folderPath, folderBtn, results));
+            const folderBtn = el('button', { class: 'ghost', text: '▶ carpeta' });
+            folderBtn.addEventListener('click', () => runCoreTests(folderPath, folderBtn, subSlot));
             subHead.appendChild(folderBtn);
+            runners.push(() => runCoreTests(folderPath, null, subSlot));
+        } else {
+            runners.push(() => runTests(p.plugin, s.sub, null, subSlot));
         }
         block.appendChild(subHead);
 
+        const cards = [];
         for (const f of s.files) {
             const runBtn = el('button', { class: 'run', text: '▶ Ejecutar' });
             const actions = [runBtn];
+            let cardSlot = null;   // panel desplegable DENTRO de la tarjeta
+
             if (p.isCore) {
-                runBtn.addEventListener('click', () => runCoreTests(f.path, runBtn, results));
+                // core: cada fichero se ejecuta por separado y muestra su resultado dentro.
+                cardSlot = makeSlot(f.path);
+                runBtn.addEventListener('click', () => runCoreTests(f.path, runBtn, cardSlot));
             } else {
-                runBtn.addEventListener('click', () => runTests(p.plugin, s.sub, runBtn, results));
+                // plugin: "Ejecutar" lanza toda la carpeta -> panel tras las tarjetas.
+                runBtn.addEventListener('click', () => runTests(p.plugin, s.sub, runBtn, subSlot));
+                // "Ver código" se despliega dentro de la propia tarjeta.
+                cardSlot = makeSlot(f.name);
                 const srcBtn = el('button', { class: 'ghost', text: '</> Ver código' });
-                srcBtn.addEventListener('click', () => viewSource(p.plugin, s.sub, f.name));
+                srcBtn.addEventListener('click', () => viewSource(p.plugin, s.sub, f.name, cardSlot));
                 actions.unshift(srcBtn);
             }
 
@@ -140,42 +161,126 @@ function renderPluginView(p) {
                 }
                 cardChildren.push(list);
             }
-            block.appendChild(el('div', { class: 'test-card' }, cardChildren));
+            if (cardSlot) cardChildren.push(cardSlot.details);
+            cards.push(el('div', { class: 'test-card' }, cardChildren));
         }
+        appendCards(block, cards); // pagina si hay más de PAGE_SIZE tarjetas
+
+        block.appendChild(subSlot.details); // resultados de carpeta, tras las tarjetas
         content.appendChild(block);
     }
 
     runAllBtn.addEventListener('click', () => {
         runAllBtn.disabled = true;
         (async () => {
-            results.innerHTML = '';
-            if (p.isCore) {
-                for (const s of p.subs) {
-                    await runCoreTests('Test/' + s.sub, null, results, true);
-                }
-            } else {
-                for (const sub of p.subs.map(s => s.sub)) {
-                    await runTests(p.plugin, sub, null, results, true);
-                }
+            for (const run of runners) {
+                await run();
             }
             runAllBtn.disabled = false;
         })();
     });
-
-    content.appendChild(results);
 }
 
-// --- view source ---
-async function viewSource(plugin, sub, file) {
-    const results = document.getElementById('results');
-    results.innerHTML = '';
-    const box = el('div');
-    box.appendChild(el('div', { class: 'suite-title', text: `${plugin}/Test/${sub}/${file}` }));
+// --- paginación de tarjetas ---
+// Si hay más de PAGE_SIZE tarjetas, se muestran de PAGE_SIZE en PAGE_SIZE con un
+// paginador. Las tarjetas se construyen una sola vez y se ocultan/muestran (no se
+// reconstruyen), de modo que los resultados ejecutados se conservan al cambiar de página.
+const PAGE_SIZE = 10;
+
+function appendCards(block, cards) {
+    if (cards.length <= PAGE_SIZE) {
+        cards.forEach(c => block.appendChild(c));
+        return;
+    }
+
+    const wrap = el('div', { class: 'cards-wrap' });
+    cards.forEach(c => wrap.appendChild(c));
+    block.appendChild(wrap);
+
+    const pager = el('div', { class: 'pager' });
+    block.appendChild(pager);
+
+    const pages = Math.ceil(cards.length / PAGE_SIZE);
+    let current = 0;
+
+    const render = () => {
+        cards.forEach((c, i) => {
+            c.style.display = (Math.floor(i / PAGE_SIZE) === current) ? '' : 'none';
+        });
+        pager.innerHTML = '';
+        const prev = el('button', { class: 'pg', text: '‹ Anterior' });
+        prev.disabled = current === 0;
+        prev.addEventListener('click', () => { current--; render(); });
+        pager.appendChild(prev);
+
+        for (let i = 0; i < pages; i++) {
+            const b = el('button', { class: 'pg' + (i === current ? ' active' : ''), text: String(i + 1) });
+            b.addEventListener('click', () => { current = i; render(); });
+            pager.appendChild(b);
+        }
+
+        const next = el('button', { class: 'pg', text: 'Siguiente ›' });
+        next.disabled = current === pages - 1;
+        next.addEventListener('click', () => { current++; render(); });
+        pager.appendChild(next);
+
+        const from = current * PAGE_SIZE + 1;
+        const to = Math.min(cards.length, (current + 1) * PAGE_SIZE);
+        pager.appendChild(el('span', { class: 'pg-count', text: `${from}–${to} de ${cards.length}` }));
+    };
+    render();
+}
+
+// --- panel de resultados desplegable (<details>) ---
+// Devuelve { details, summary, titleEl, badge, body }. Oculto hasta la primera ejecución.
+function makeSlot(title) {
+    const caret = el('span', { class: 'slot-caret', text: '▸' });
+    const titleEl = el('span', { class: 'slot-title', text: title });
+    const badge = el('span', { class: 'slot-badge' });
+    const summary = el('summary', { class: 'slot-summary' }, [caret, titleEl, badge]);
+    const body = el('div', { class: 'result-slot-body' });
+    const details = el('details', { class: 'result-slot' }, [summary, body]);
+    details.hidden = true;
+    return { details, summary, titleEl, badge, body };
+}
+
+function setSlotBadge(slot, text, kind) {
+    slot.badge.textContent = text;
+    slot.badge.className = 'slot-badge' + (kind ? ' ' + kind : '');
+}
+
+// abre el panel, lo vacía y muestra el spinner mientras corre.
+function slotStart(slot, label) {
+    slot.details.hidden = false;
+    slot.details.open = true;
+    slot.body.innerHTML = '';
+    setSlotBadge(slot, 'ejecutando…', 'running');
+    slot.body.appendChild(el('div', { class: 'suite-title' }, [
+        el('span', { class: 'spinner' }), ' Ejecutando ' + label + ' …'
+    ]));
+}
+
+// etiqueta compacta en el summary a partir de los totales.
+function slotDone(slot, data) {
+    const t = data.totals || {};
+    const fails = (t.fail || 0) + (t.error || 0);
+    if (fails > 0) {
+        setSlotBadge(slot, `${fails} fallo${fails > 1 ? 's' : ''} · ${t.pass || 0}/${t.tests || 0}`, 'fail');
+    } else {
+        setSlotBadge(slot, `${t.pass || 0}/${t.tests || 0} OK · ${fmtTime(t.time || 0)}`, 'ok');
+    }
+}
+
+// --- view source (se despliega dentro de la tarjeta) ---
+async function viewSource(plugin, sub, file, slot) {
+    slot.details.hidden = false;
+    slot.details.open = true;
+    slot.body.innerHTML = '';
+    setSlotBadge(slot, 'código', '');
     const pre = el('pre');
     const code = el('code', { class: 'language-php' });
     pre.appendChild(code);
-    box.appendChild(pre);
-    results.appendChild(box);
+    slot.body.appendChild(pre);
 
     try {
         const url = `?action=source&plugin=${encodeURIComponent(plugin)}&sub=${encodeURIComponent(sub)}&file=${encodeURIComponent(file)}`;
@@ -185,58 +290,49 @@ async function viewSource(plugin, sub, file) {
         code.textContent = data.source;
         if (window.hljs) hljs.highlightElement(code);
     } catch (e) {
-        results.innerHTML = '';
-        results.appendChild(el('div', { class: 'error-box', text: 'No se pudo cargar el código: ' + e.message }));
+        slot.body.innerHTML = '';
+        setSlotBadge(slot, 'error', 'fail');
+        slot.body.appendChild(el('div', { class: 'error-box', text: 'No se pudo cargar el código: ' + e.message }));
     }
 }
 
-// --- run ---
-async function runTests(plugin, sub, btn, results, append = false) {
+// --- run (plugin: carpeta completa) ---
+async function runTests(plugin, sub, btn, slot) {
     if (btn) btn.disabled = true;
-    if (!append) results.innerHTML = '';
-
-    const loading = el('div', { class: 'suite-title' }, [
-        el('span', { class: 'spinner' }),
-        ' Ejecutando ' + plugin + '/' + sub + ' …'
-    ]);
-    results.appendChild(loading);
-
+    slotStart(slot, plugin + '/' + sub);
     try {
         const body = new URLSearchParams({ plugin, sub });
         const res = await fetch('?action=run', { method: 'POST', body });
         const data = await res.json();
-        loading.remove();
+        slot.body.innerHTML = '';
         if (!data.ok) throw new Error(data.error || 'Error de ejecución');
-        renderResult(data, results);
+        renderResult(data, slot.body);
+        slotDone(slot, data);
     } catch (e) {
-        loading.remove();
-        results.appendChild(el('div', { class: 'error-box', text: 'Error: ' + e.message }));
+        slot.body.innerHTML = '';
+        setSlotBadge(slot, 'error', 'fail');
+        slot.body.appendChild(el('div', { class: 'error-box', text: 'Error: ' + e.message }));
     } finally {
         if (btn) btn.disabled = false;
     }
 }
 
-// ejecuta un test del CORE (fichero o carpeta bajo Test/Core); $path relativo a la raíz del core.
-async function runCoreTests(path, btn, results, append = false) {
+// ejecuta un test del CORE (fichero o carpeta bajo Test/Core); path relativo a la raíz del core.
+async function runCoreTests(path, btn, slot) {
     if (btn) btn.disabled = true;
-    if (!append) results.innerHTML = '';
-
-    const loading = el('div', { class: 'suite-title' }, [
-        el('span', { class: 'spinner' }),
-        ' Ejecutando ' + path + ' …'
-    ]);
-    results.appendChild(loading);
-
+    slotStart(slot, path);
     try {
         const body = new URLSearchParams({ core: '1', path });
         const res = await fetch('?action=run', { method: 'POST', body });
         const data = await res.json();
-        loading.remove();
+        slot.body.innerHTML = '';
         if (!data.ok) throw new Error(data.error || 'Error de ejecución');
-        renderResult(data, results);
+        renderResult(data, slot.body);
+        slotDone(slot, data);
     } catch (e) {
-        loading.remove();
-        results.appendChild(el('div', { class: 'error-box', text: 'Error: ' + e.message }));
+        slot.body.innerHTML = '';
+        setSlotBadge(slot, 'error', 'fail');
+        slot.body.appendChild(el('div', { class: 'error-box', text: 'Error: ' + e.message }));
     } finally {
         if (btn) btn.disabled = false;
     }
