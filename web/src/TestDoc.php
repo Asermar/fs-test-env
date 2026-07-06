@@ -34,7 +34,7 @@ class TestDoc
      */
     public static function forFile(string $path): array
     {
-        $out = ['class' => null, 'methods' => []];
+        $out = ['class' => null, 'classTitle' => null, 'methods' => []];
 
         $code = @file_get_contents($path);
         if ($code === false || $code === '') {
@@ -59,7 +59,9 @@ class TestDoc
 
                 case T_CLASS:
                     if ($pendingDoc !== null) {
-                        $out['class'] = self::render($pendingDoc);
+                        $cls = self::renderClass($pendingDoc);
+                        $out['class'] = $cls['html'];
+                        $out['classTitle'] = $cls['title'];
                         $pendingDoc = null;
                     }
                     break;
@@ -118,6 +120,52 @@ class TestDoc
             return null;
         }
         return null;
+    }
+
+    /**
+     * Como render(), pero además extrae el título de la clase: si la descripción empieza
+     * por un encabezado markdown (# ... ###### ...), su texto se devuelve como 'title' y se
+     * elimina del cuerpo (para no duplicarlo). Si no hay encabezado inicial, 'title' es null.
+     *
+     * @return array{title: ?string, html: ?string}
+     */
+    private static function renderClass(string $docblock): array
+    {
+        $text = self::extractText($docblock);
+        if ($text === '') {
+            return ['title' => null, 'html' => null];
+        }
+
+        $lines = preg_split('/\R/', $text) ?: [];
+        $title = null;
+        // primer no vacío: si es encabezado markdown, es el título
+        foreach ($lines as $idx => $line) {
+            if (trim($line) === '') {
+                continue;
+            }
+            if (preg_match('/^\s*#{1,6}\s+(.+?)\s*$/', $line, $m)) {
+                $title = self::plainTitle($m[1]);
+                unset($lines[$idx]);
+            }
+            break;
+        }
+
+        $body = trim(implode("\n", $lines));
+        $html = null;
+        if ($body !== '') {
+            $parsedown = new \Parsedown();
+            $parsedown->setSafeMode(true);
+            $h = trim($parsedown->text($body));
+            $html = $h === '' ? null : $h;
+        }
+
+        return ['title' => $title, 'html' => $html];
+    }
+
+    /** Texto plano de un título: quita marcas markdown inline (`, *, _). */
+    private static function plainTitle(string $s): string
+    {
+        return trim(str_replace(['`', '**', '*', '__', '_'], '', $s));
     }
 
     /** Convierte el texto de un docblock en HTML de markdown (o null si queda vacío). */

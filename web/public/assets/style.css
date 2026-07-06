@@ -131,6 +131,15 @@ body {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.test-filename {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.82rem;
+    font-weight: 400;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .test-actions { display: flex; gap: 0.5rem; flex-shrink: 0; }
 
 /* Descripción (markdown) de la clase de test */

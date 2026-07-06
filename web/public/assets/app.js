@@ -198,10 +198,16 @@ function renderPluginView(p) {
 
             // caret para plegar/desplegar la tarjeta (oculta descripción, métodos y resultado).
             const caret = el('span', { class: 'card-caret', text: '▾' });
+            // título de la tarjeta: si el test tiene título, se usa con el .php entre
+            // paréntesis; si no, el nombre del fichero como hasta ahora.
+            const titleParts = [el('span', { class: 'test-file', text: f.title || f.name })];
+            if (f.title) {
+                titleParts.push(el('span', { class: 'test-filename', text: '(' + f.name + ')' }));
+            }
             const info = el('div', { class: 'test-info' }, [
                 caret,
                 el('span', { class: 'test-icon', text: '🧪' }),
-                el('span', { class: 'test-file', text: f.name })
+                ...titleParts
             ]);
             const top = el('div', { class: 'test-card-top' }, [
                 info,

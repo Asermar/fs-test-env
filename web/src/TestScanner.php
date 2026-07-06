@@ -333,6 +333,7 @@ class TestScanner
                     $doc = TestDoc::forFile($subPath . '/' . $file);
                     $files[] = [
                         'name' => $file,
+                        'title' => $doc['classTitle'] ?? null,
                         'desc' => $doc['class'],
                         'methods' => $doc['methods'],
                     ];
