@@ -32,10 +32,15 @@ class TestRunner
     /**
      * @return array<string, mixed>
      */
-    public function run(string $plugin, string $sub): array
+    public function run(string $plugin, string $sub, string $file = ''): array
     {
         if (!$this->safe($plugin) || !$this->safe($sub)) {
             return $this->fail('Parámetros no válidos.');
+        }
+        // fichero opcional: ejecuta SOLO ese *Test.php de la carpeta (el resto de la
+        // carpeta -deps, install-plugins.txt- se sigue copiando y activando igual).
+        if ($file !== '' && (!$this->safe($file) || substr($file, -8) !== 'Test.php')) {
+            return $this->fail('Nombre de fichero de test no válido.');
         }
 
         $srcTest = $this->baseDir . '/' . $this->coreDir . '/Plugins/' . $plugin . '/Test/' . $sub;
@@ -88,10 +93,14 @@ class TestRunner
                 }
             }
 
-            // 3) ejecutar PHPUnit con logging JUnit
+            // 3) ejecutar PHPUnit con logging JUnit. Si se indicó un fichero, se pasa
+            //    como argumento para ejecutar solo ese caso (ignora la testsuite del config).
             $cmd = 'php ' . escapeshellarg('vendor/bin/phpunit')
                 . ' -c ' . escapeshellarg($config)
                 . ' --log-junit ' . escapeshellarg($junit);
+            if ($file !== '') {
+                $cmd .= ' ' . escapeshellarg('Test/Plugins/' . $file);
+            }
             [$exitCode, $stdout, ] = $this->exec($cmd);
 
             $junitXml = is_file($junit) ? (string)file_get_contents($junit) : '';
@@ -108,6 +117,7 @@ class TestRunner
             'ok' => true,
             'plugin' => $plugin,
             'sub' => $sub,
+            'file' => $file,
             'config' => $config,
             'exitCode' => $exitCode ?? -1,
             'stdout' => $stdout ?? '',

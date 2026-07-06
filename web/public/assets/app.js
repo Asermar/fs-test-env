@@ -104,19 +104,16 @@ function renderPluginView(p) {
             el('span', { text: s.sub + (s.deps ? ' · deps: ' + s.deps.replace(/\s+/g, ', ') : '') })
         ]);
 
-        // panel de resultados a nivel de carpeta: se coloca TRAS las tarjetas.
-        // - plugin: el "Ejecutar" de cada tarjeta lanza toda la carpeta -> aquí.
-        // - core: lo usa el botón "carpeta".
-        const subSlot = makeSlot(p.isCore ? 'Test/' + s.sub : p.plugin + '/' + s.sub);
-
+        // panel de resultados a nivel de carpeta: solo para el botón "carpeta" del core.
+        // (En plugins cada fichero muestra su resultado dentro de su propia tarjeta.)
+        let subSlot = null;
         if (p.isCore) {
+            subSlot = makeSlot('Test/' + s.sub);
             const folderPath = 'Test/' + s.sub;
             const folderBtn = el('button', { class: 'ghost', text: '▶ carpeta' });
             folderBtn.addEventListener('click', () => runCoreTests(folderPath, folderBtn, subSlot));
             subHead.appendChild(folderBtn);
             runners.push(() => runCoreTests(folderPath, null, subSlot));
-        } else {
-            runners.push(() => runTests(p.plugin, s.sub, null, subSlot));
         }
         block.appendChild(subHead);
 
@@ -124,17 +121,16 @@ function renderPluginView(p) {
         for (const f of s.files) {
             const runBtn = el('button', { class: 'run', text: '▶ Ejecutar' });
             const actions = [runBtn];
-            let cardSlot = null;   // panel desplegable DENTRO de la tarjeta
+            // cada tarjeta (fichero) tiene su propio panel desplegable de resultados.
+            const cardSlot = makeSlot(p.isCore ? f.path : p.plugin + '/' + s.sub + '/' + f.name);
 
             if (p.isCore) {
-                // core: cada fichero se ejecuta por separado y muestra su resultado dentro.
-                cardSlot = makeSlot(f.path);
                 runBtn.addEventListener('click', () => runCoreTests(f.path, runBtn, cardSlot));
             } else {
-                // plugin: "Ejecutar" lanza toda la carpeta -> panel tras las tarjetas.
-                runBtn.addEventListener('click', () => runTests(p.plugin, s.sub, runBtn, subSlot));
-                // "Ver código" se despliega dentro de la propia tarjeta.
-                cardSlot = makeSlot(f.name);
+                // plugin: "Ejecutar" lanza SOLO este fichero -> resultado dentro de su tarjeta.
+                runBtn.addEventListener('click', () => runTests(p.plugin, s.sub, f.name, runBtn, cardSlot));
+                runners.push(() => runTests(p.plugin, s.sub, f.name, null, cardSlot));
+                // "Ver código" se despliega en el mismo panel de la tarjeta.
                 const srcBtn = el('button', { class: 'ghost', text: '</> Ver código' });
                 srcBtn.addEventListener('click', () => viewSource(p.plugin, s.sub, f.name, cardSlot));
                 actions.unshift(srcBtn);
@@ -166,7 +162,9 @@ function renderPluginView(p) {
         }
         appendCards(block, cards); // pagina si hay más de PAGE_SIZE tarjetas
 
-        block.appendChild(subSlot.details); // resultados de carpeta, tras las tarjetas
+        if (subSlot) {
+            block.appendChild(subSlot.details); // resultados de "carpeta" (core), tras las tarjetas
+        }
         content.appendChild(block);
     }
 
@@ -296,12 +294,12 @@ async function viewSource(plugin, sub, file, slot) {
     }
 }
 
-// --- run (plugin: carpeta completa) ---
-async function runTests(plugin, sub, btn, slot) {
+// --- run (plugin: un fichero de test concreto de la carpeta) ---
+async function runTests(plugin, sub, file, btn, slot) {
     if (btn) btn.disabled = true;
-    slotStart(slot, plugin + '/' + sub);
+    slotStart(slot, plugin + '/' + sub + (file ? '/' + file : ''));
     try {
-        const body = new URLSearchParams({ plugin, sub });
+        const body = new URLSearchParams({ plugin, sub, file: file || '' });
         const res = await fetch('?action=run', { method: 'POST', body });
         const data = await res.json();
         slot.body.innerHTML = '';
@@ -340,7 +338,7 @@ async function runCoreTests(path, btn, slot) {
 
 function renderResult(data, results) {
     const t = data.totals || {};
-    const label = data.sub || data.path || '';
+    const label = data.file || data.path || data.sub || '';
     const summary = el('div', { class: 'summary' }, [
         el('span', { class: 'chip', text: `${label} · ${t.tests || 0} tests` }),
         el('span', { class: 'chip pass', text: `${t.pass || 0} OK` }),

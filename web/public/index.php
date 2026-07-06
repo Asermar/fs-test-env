@@ -56,7 +56,8 @@ switch ($action) {
         } else {
             $result = $runner->run(
                 (string)($_POST['plugin'] ?? ''),
-                (string)($_POST['sub'] ?? '')
+                (string)($_POST['sub'] ?? ''),
+                (string)($_POST['file'] ?? '')
             );
         }
         json_out($result);
