@@ -61,14 +61,42 @@ switch ($action) {
     default:
         $scanner = new TestScanner($base);
         $plugins = $scanner->plugins();
-        render_page($plugins);
+        render_page($plugins, core_ref($base));
         break;
+}
+
+/** Referencia (tag o rama) del core de FacturaScripts provisionado en test-env. */
+function core_ref(string $base): string
+{
+    $fsDir = getenv('TESTENV_DIR') ?: $base . '/test-env/facturascripts';
+
+    // si hay git y el core es un repo, el tag exacto (o la rama) es lo más fiable.
+    if (is_dir($fsDir . '/.git') && function_exists('shell_exec')) {
+        $g = 'git -C ' . escapeshellarg($fsDir) . ' ';
+        $tag = trim((string)@shell_exec($g . 'describe --tags --exact-match HEAD 2>/dev/null'));
+        if ($tag !== '') {
+            return $tag;
+        }
+        $branch = trim((string)@shell_exec($g . 'rev-parse --abbrev-ref HEAD 2>/dev/null'));
+        if ($branch !== '' && $branch !== 'HEAD') {
+            return $branch;
+        }
+    }
+
+    // fallback sin git: versión del Kernel del core -> tag equivalente vX.
+    $kernel = $fsDir . '/Core/Kernel.php';
+    if (is_file($kernel)
+        && preg_match('/function\s+version\s*\([^)]*\)\s*:\s*float\s*\{\s*return\s+([0-9.]+)/s', (string)file_get_contents($kernel), $m)) {
+        return 'v' . $m[1];
+    }
+
+    return '';
 }
 
 /**
  * @param array<int, array<string, mixed>> $plugins
  */
-function render_page(array $plugins): void
+function render_page(array $plugins, string $coreRef): void
 {
     $data = json_encode($plugins, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     $totalTests = array_sum(array_map(static fn($p) => $p['total'], $plugins));
@@ -88,7 +116,10 @@ function render_page(array $plugins): void
 <body>
     <header class="topbar">
         <h1><?= htmlspecialchars($title, ENT_QUOTES) ?></h1>
-        <div class="meta"><?= $nPlugins ?> plugins · <?= $totalTests ?> ficheros de test</div>
+        <div class="meta">
+            <?= $nPlugins ?> plugins · <?= $totalTests ?> ficheros de test<?php if ($coreRef !== ''): ?>
+            · core <span class="core-ref"><?= htmlspecialchars($coreRef, ENT_QUOTES) ?></span><?php endif ?>
+        </div>
     </header>
 
     <main id="app">

@@ -319,3 +319,7 @@ details.raw summary { cursor: pointer; color: var(--muted); }
     border-radius: 6px;
     padding: 0.8rem;
 }
+
+/* versión del plugin junto al nombre, y tag del core en la cabecera */
+.plugin-ver { color: var(--muted); font-weight: 400; font-size: 0.85em; }
+.core-ref { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); }

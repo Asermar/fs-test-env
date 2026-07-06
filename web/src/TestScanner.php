@@ -108,12 +108,27 @@ class TestScanner
 
             $result[] = [
                 'plugin' => $plugin,
+                'version' => $this->pluginVersion($plugin),
                 'subs' => $subs,
                 'total' => $total,
             ];
         }
 
         return $result;
+    }
+
+    /** Versión del plugin leída de su facturascripts.ini (o '' si no se encuentra). */
+    private function pluginVersion(string $plugin): string
+    {
+        $ini = $this->pluginsDir . '/' . $plugin . '/facturascripts.ini';
+        if (!is_file($ini)) {
+            return '';
+        }
+        $content = (string)file_get_contents($ini);
+        if (preg_match('/^\s*version\s*=\s*[\'"]?([0-9][0-9.]*)/mi', $content, $m)) {
+            return $m[1];
+        }
+        return '';
     }
 
     /**

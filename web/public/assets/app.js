@@ -59,7 +59,10 @@ function renderSidebar() {
     let firstItem = null, firstPlugin = null;
     for (const p of PLUGINS) {
         const head = el('div', { class: 'plugin-head' }, [
-            el('span', { text: p.plugin }),
+            el('span', {}, [
+                p.plugin,
+                p.version ? el('span', { class: 'plugin-ver', text: ' (' + p.version + ')' }) : null
+            ]),
             el('span', { class: 'badge', text: String(p.total) })
         ]);
         const item = el('div', { class: 'plugin-item' }, [head]);
@@ -83,7 +86,10 @@ function renderPluginView(p) {
 
     const runAllBtn = el('button', { class: 'primary', text: 'Ejecutar todos' });
     content.appendChild(el('div', { class: 'content-head' }, [
-        el('h2', { text: p.plugin }),
+        el('h2', {}, [
+            p.plugin,
+            p.version ? el('span', { class: 'plugin-ver', text: ' (' + p.version + ')' }) : null
+        ]),
         runAllBtn
     ]));
 
