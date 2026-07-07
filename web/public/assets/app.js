@@ -119,7 +119,7 @@ function selectPlugin(p, item) {
 function renderPluginView(p) {
     content.innerHTML = '';
 
-    const runAllBtn = el('button', { class: 'run danger', text: '▶ Ejecutar todos' });
+    const runAllBtn = el('button', { class: 'run danger', text: '▶ Ejecutar todos', title: 'Se ejecutan todos los test del Core/Plugin. Puede tardar mucho tiempo' });
     const clearBtn = el('button', { class: 'ghost', text: '🧹 Limpiar' });
     content.appendChild(el('div', { class: 'content-head' }, [
         el('h2', {}, [
@@ -178,8 +178,8 @@ function renderPluginView(p) {
 
         // botones de carpeta: agregado (naranja, una sola ejecución de PHPUnit) y
         // fichero a fichero (verde, ejecuta cada tarjeta en secuencia con feedback incremental).
-        const folderBtn = el('button', { class: 'run folder', text: `▶ Ejecutar Test en Carpeta (${folderTests})` });
-        const fileByFileBtn = el('button', { class: 'run', text: '▶ Fichero a fichero' });
+        const folderBtn = el('button', { class: 'run folder', text: `▶ Ejecutar Tests en Carpeta (${folderTests})`, title: 'Ejecutar los tests de esta carpeta. Puede tardar mucho tiempo' });
+        const fileByFileBtn = el('button', { class: 'run', text: '▶ Fichero a fichero', title: 'Ejecutar los test por archivo, actualización más frecuente' });
         const toggleBtn = el('button', { class: 'ghost', text: '⊕ Expandir Tests' });
         const subActions = el('div', { class: 'sub-actions' }, [toggleBtn, folderBtn, fileByFileBtn]);
         const subHead = el('div', { class: 'sub-name' }, [
@@ -229,7 +229,7 @@ function renderPluginView(p) {
         if (p.isCore) runners.push(() => runFolder(null));
         block.appendChild(subHead);
         for (const f of s.files) {
-            const runBtn = el('button', { class: 'run', text: '▶ Ejecutar' });
+            const runBtn = el('button', { class: 'run', text: '▶ Ejecutar', title: 'Ejecutar los tests de este archivo' });
             const actions = [runBtn];
             // cada tarjeta (fichero) tiene su propio panel desplegable de resultados.
             const cardSlot = makeSlot('Resumen y salida de PHPUnit');
