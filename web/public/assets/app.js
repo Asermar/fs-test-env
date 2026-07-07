@@ -179,7 +179,7 @@ function renderPluginView(p) {
         // botones de carpeta: agregado (naranja, una sola ejecución de PHPUnit) y
         // fichero a fichero (verde, ejecuta cada tarjeta en secuencia con feedback incremental).
         const folderBtn = el('button', { class: 'run folder', text: `▶ Ejecutar Tests en Carpeta (${folderTests})`, title: 'Ejecutar los tests de esta carpeta. Puede tardar mucho tiempo' });
-        const fileByFileBtn = el('button', { class: 'run', text: '▶ Fichero a fichero', title: 'Ejecutar los test por archivo, actualización más frecuente' });
+        const fileByFileBtn = el('button', { class: 'run', text: '▶ Fichero a fichero', title: 'Ejecutar los tests de la carpeta archivo a archivo. Actualización más frecuente' });
         const toggleBtn = el('button', { class: 'ghost', text: '⊕ Expandir Tests' });
         const subActions = el('div', { class: 'sub-actions' }, [toggleBtn, folderBtn, fileByFileBtn]);
         const subHead = el('div', { class: 'sub-name' }, [
