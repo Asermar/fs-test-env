@@ -105,3 +105,55 @@ Al hacer cambios en el tooling, sube el número de `VERSION` y crea el tag corre
 
 Cada `*Test.php` puede documentar clase y métodos con un bloque `@description` (markdown) en su
 docblock; si no lo tiene, se usa el propio docblock como descripción. El runner web lo renderiza.
+Si la descripción de la clase empieza por un encabezado markdown (`## ...`), ese texto se usa como
+**título de la tarjeta** (con el nombre del `.php` entre paréntesis).
+
+### Ejemplo: docblock sin `@description`
+
+Se usa **todo** el docblock como descripción (ignorando líneas de tags `@...`):
+
+```php
+/**
+ * ## Alias polimórficos
+ *
+ * Valida el modelo base `Alias` y sus reglas:
+ * - **Un solo favorito** por entidad.
+ * - Alias **único** por tipo.
+ */
+class AliasTest extends TestCase
+{
+    /** Comprueba que el favorito es único por entidad. */
+    public function testUnFavoritoPorEntidad(): void
+    {
+        // ...
+    }
+}
+```
+
+### Ejemplo: docblock con `@description`
+
+Solo el texto **tras `@description`** (hasta el siguiente `@tag` o el final) es la descripción; el
+resto de tags (`@author`, etc.) se ignora:
+
+```php
+/**
+ * @author Alexis Serafín <alexis@okodex.com>
+ *
+ * @description
+ * ## Importación de repostajes — CSVimport activado
+ *
+ * Verifica que, con `CSVimport` activado, la importación en `ListFuelKm`:
+ * 1. Queda **disponible** (`csvImportAvailable()` es `true`).
+ * 2. `Init::init()` registra la plantilla manual `FuelKm`.
+ */
+class CsvImportPresentTest extends TestCase
+{
+    /**
+     * @description Con CSVimport activado, la importación debe estar disponible.
+     */
+    public function testImportEnabledWhenCsvImportEnabled(): void
+    {
+        // ...
+    }
+}
+```
