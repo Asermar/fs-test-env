@@ -29,6 +29,10 @@ Resultados de una ejecución (resumen + estado y descripción por caso):
   al conjunto exacto de `Test/Plugins/install-plugins.txt` (activa/desactiva) — así funcionan los
   tests de *ausencia* de un plugin.
 - `bin/setup-test-env.sh` — front interactivo para el host (deps, prompts) que delega en la provisión.
+- `bin/up.sh` — levanta el contenedor del entorno de test de forma **idempotente**: si ya está
+  corriendo no hace nada; si está parado o no existe, lo levanta con el compose del proyecto
+  (`<engine>-compose up -d <servicio>`), y el arranque provisiona/actualiza el entorno.
+  No interactivo (pensado para un botón, p.ej. la sección Scripts de OkoGit).
 - `bin/plugin-topo-order.php` — ordena plugins por sus dependencias `require`.
 - `web/` — runner web (PHP plano + JS): lista los plugins con tests, muestra la **descripción
   markdown** (`@description`) de cada test y ejecuta las suites mostrando los resultados.
@@ -67,6 +71,19 @@ servicio desde la plantilla correspondiente:
   permisos, ejecuta el servicio con `user: "UID:GID"` de tu usuario.
 
 El resto del servicio (red, volúmenes, comando de provisión, labels de traefik) es idéntico.
+
+## Levantar el entorno (contenedor)
+
+```bash
+test-bin/bin/up.sh
+#  - si el contenedor ya está corriendo: no toca nada
+#  - si no: <engine>-compose up -d <servicio>  (crea/arranca y auto-provisiona)
+```
+
+Localiza el compose automáticamente bajo la raíz del proyecto (según `CONTAINER_ENGINE`:
+`podman/podman-compose.yaml` o `docker-compose.yaml`, entre otros). Si tu compose está en
+otra ruta, define **`TESTENV_COMPOSE_FILE`** (absoluta o relativa a la raíz) en
+`.fs-test-env.env` o por entorno.
 
 ## Configuración
 
