@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Manual de uso · fs-test-env</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1d212b;
+    --border: #2a2f3a;
+    --text: #e6e9ef;
+    --muted: #9aa3b2;
+    --accent: #4c8bf5;
+    --green: #2ecc71;
+    --red: #e74c3c;
+    --orange: #e67e22;
+    --yellow: #f1c40f;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.55;
+  }
+  code, kbd, .mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+
+  /* ---- layout del documento ---- */
+  .wrap { max-width: 980px; margin: 0 auto; padding: 2.4rem 1.4rem 5rem; }
+  header.doc { border-bottom: 1px solid var(--border); padding-bottom: 1.4rem; margin-bottom: 2rem; }
+  header.doc h1 { margin: 0 0 .3rem; font-size: 1.7rem; }
+  header.doc p { margin: .2rem 0 0; color: var(--muted); }
+
+  h2 { font-size: 1.3rem; margin: 2.6rem 0 .8rem; padding-top: .6rem; border-top: 1px solid var(--border); }
+  h3 { font-size: 1.05rem; margin: 1.6rem 0 .5rem; color: var(--accent); }
+  p, li { color: var(--text); }
+  a { color: var(--accent); }
+  ul, ol { padding-left: 1.4rem; }
+  li { margin: .25rem 0; }
+
+  code {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: .06em .38em;
+    font-size: .86em;
+    color: #d6deea;
+  }
+  pre {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: .9rem 1rem;
+    overflow-x: auto;
+  }
+  pre code { background: none; border: 0; padding: 0; font-size: .84rem; }
+
+  .note {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 6px;
+    padding: .7rem 1rem;
+    margin: 1rem 0;
+    color: var(--muted);
+  }
+  .note strong { color: var(--text); }
+
+  /* ---- índice ---- */
+  nav.toc { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
+  nav.toc strong { display: block; color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; margin-bottom: .5rem; }
+  nav.toc ol { margin: 0; }
+
+  figure { margin: 1.4rem 0; }
+  figcaption { color: var(--muted); font-size: .82rem; margin-top: .5rem; text-align: center; }
+
+  /* =====================================================================
+     MOCKUP — reproduce el aspecto real del runner web (web/public/assets)
+     ===================================================================== */
+  .mock {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--bg);
+    font-size: 13px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.35);
+  }
+  .mock .m-topbar {
+    display: flex; align-items: baseline; gap: 1rem;
+    padding: .7rem 1rem;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .mock .m-topbar h4 { margin: 0; font-size: 1rem; }
+  .mock .m-meta { color: var(--muted); font-size: .8rem; }
+  .mock .m-meta b { color: var(--accent); font-weight: 600; }
+
+  .mock .m-body { display: grid; grid-template-columns: 210px 1fr; }
+  .mock .m-side { border-right: 1px solid var(--border); background: var(--panel); padding: .5rem; }
+  .mock .m-item {
+    display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+    padding: .55rem .6rem; border-radius: 7px; margin-bottom: .35rem;
+    border: 1px solid transparent; color: var(--text);
+  }
+  .mock .m-item .m-badge { background: var(--panel-2); color: var(--muted); border-radius: 999px; font-size: .72rem; padding: .05rem .5rem; }
+  .mock .m-item.core { color: var(--text); }
+  .mock .m-item.core b { color: var(--accent); }
+  .mock .m-item.active { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .mock .m-item .dim { color: var(--muted); font-weight: 400; }
+
+  .mock .m-main { padding: .9rem 1rem; overflow-x: auto; }
+
+  .m-row { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+  .m-spacer { flex: 1; }
+  .m-h2 { font-size: 1.05rem; font-weight: 700; margin: 0; }
+  .m-h2 .dim { color: var(--muted); font-weight: 400; }
+
+  .btn { border: 1px solid var(--border); border-radius: 7px; padding: .4rem .7rem; font-size: .8rem; font-weight: 600; white-space: nowrap; cursor: default; }
+  .btn.ghost { background: var(--panel); color: var(--text); }
+  .btn.green { background: var(--green); color: #06331b; border-color: transparent; }
+  .btn.red { background: var(--red); color: #3a0d08; border-color: transparent; }
+  .btn.orange { background: var(--orange); color: #3a1e05; border-color: transparent; }
+
+  .m-folder { color: var(--accent); font-weight: 700; }
+  .m-card {
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: .8rem .9rem;
+    margin: .8rem 0;
+  }
+  .m-card-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+  .m-card-title { font-weight: 700; }
+  .m-file { color: var(--muted); font-weight: 400; }
+  .m-chip { background: var(--panel-2); color: var(--muted); border-radius: 999px; font-size: .72rem; padding: .05rem .5rem; }
+  .m-chip.ok { color: var(--green); background: rgba(46,204,113,.12); }
+  .m-desc { color: var(--text); margin: .6rem 0 0; font-size: .86rem; }
+  .m-desc .muted { color: var(--muted); }
+
+  .m-method { background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: .5rem .6rem; margin-top: .55rem; }
+  .m-method-title { color: var(--accent); font-weight: 600; font-size: .84rem; }
+  .m-method-desc { color: var(--muted); font-size: .8rem; margin-top: .15rem; }
+
+  .m-result { border-left: 3px solid var(--green); background: var(--panel-2); border-radius: 6px; padding: .5rem .6rem; margin-top: .5rem; }
+  .m-result .m-badge-ok { background: var(--green); color: #06331b; border-radius: 4px; font-size: .7rem; font-weight: 700; padding: .05rem .4rem; }
+  .m-result .m-time { color: var(--muted); font-size: .74rem; float: right; }
+
+  .m-summary { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: .7rem .8rem; margin: .7rem 0; }
+  .m-summary .m-file-line { color: var(--text); font-size: .84rem; margin-bottom: .5rem; }
+  .m-stats { display: flex; gap: .4rem; flex-wrap: wrap; }
+  .m-stat { border: 1px solid var(--border); border-radius: 6px; padding: .25rem .6rem; font-size: .78rem; color: var(--muted); }
+  .m-stat.ok { color: var(--green); }
+  .m-stat.fail { color: var(--red); }
+  .m-details { color: var(--muted); font-size: .82rem; margin-top: .5rem; }
+  .m-mono { font-family: "SFMono-Regular", Consolas, monospace; }
+
+  .legend { list-style: none; padding: 0; margin: .8rem 0 0; }
+  .legend li { display: flex; gap: .6rem; align-items: baseline; margin: .4rem 0; }
+  .legend .k { flex: 0 0 auto; }
+
+  footer.doc { margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .82rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="doc">
+    <h1>Manual de uso — <span class="mono">fs-test-env</span></h1>
+    <p>Runner web para ejecutar los tests (PHPUnit) de los plugins de FacturaScripts.</p>
+  </header>
+
+  <nav class="toc">
+    <strong>Contenido</strong>
+    <ol>
+      <li><a href="#que-es">Qué es y para qué sirve</a></li>
+      <li><a href="#acceder">Cómo acceder</a></li>
+      <li><a href="#listado">La pantalla de listado</a></li>
+      <li><a href="#ejecutar">Ejecutar tests: los cuatro modos</a></li>
+      <li><a href="#resultados">Leer los resultados</a></li>
+      <li><a href="#codigo">Ver el código de un test</a></li>
+      <li><a href="#descripciones">De dónde salen las descripciones</a></li>
+      <li><a href="#cli">Alternativa por línea de comandos</a></li>
+    </ol>
+  </nav>
+
+  <!-- ========================================================= -->
+  <h2 id="que-es">1. Qué es y para qué sirve</h2>
+  <p>
+    <span class="mono">fs-test-env</span> monta un <strong>entorno de pruebas aislado</strong> de
+    FacturaScripts (su propio core y su propia base de datos, <code>mesafs_test</code>) y ofrece una
+    web para <strong>lanzar los tests de tus plugins y ver los resultados</strong> sin tocar la
+    instalación ni la base de datos de trabajo del proyecto.
+  </p>
+  <p>Con el runner web puedes:</p>
+  <ul>
+    <li>Ver, por plugin, todos los ficheros <code>*Test.php</code> con una <strong>descripción legible</strong> de qué comprueba cada uno.</li>
+    <li>Ejecutar los tests a distintos niveles (todo el plugin, una carpeta, un fichero) y ver el resultado al instante.</li>
+    <li>Consultar el código fuente de cada test sin salir de la página.</li>
+  </ul>
+
+  <!-- ========================================================= -->
+  <h2 id="acceder">2. Cómo acceder</h2>
+  <p>
+    Una vez levantado y provisionado el entorno (ver <code>README.md</code>), la web se sirve en el
+    host configurado en <code>TESTENV_HOST</code> (p. ej. <code>http://test.mesafs.asermar.com</code>).
+    Ábrelo en el navegador: no necesita login.
+  </p>
+  <div class="note">
+    <strong>¿No carga?</strong> Levanta el contenedor del entorno con
+    <code>test-bin/bin/up.sh</code> (idempotente: si ya está corriendo, no hace nada). Los detalles
+    de instalación y configuración están en el <code>README.md</code> del repositorio.
+  </div>
+
+  <!-- ========================================================= -->
+  <h2 id="listado">3. La pantalla de listado</h2>
+  <p>
+    Al abrir la web verás la cabecera con el título y un resumen (nº de plugins, nº de ficheros de
+    test, versión del <em>core</em> y del entorno), la <strong>barra lateral</strong> con los
+    plugins, y el <strong>panel central</strong> con los tests del plugin seleccionado.
+  </p>
+
+  <figure>
+    <div class="mock">
+      <div class="m-topbar">
+        <h4>Tests de plugins · Mesa FS</h4>
+        <div class="m-meta">6 plugins · 126 ficheros de test · core <b>v2026.3</b> · entorno <b>v2.0.0</b></div>
+      </div>
+      <div class="m-body">
+        <!-- sidebar -->
+        <div class="m-side">
+          <div class="m-item core"><span>⚙ <b>FacturaScripts Core</b></span><span class="m-badge">1080</span></div>
+          <div class="m-item"><span>Alias <span class="dim">(0.2)</span></span><span class="m-badge">6</span></div>
+          <div class="m-item"><span>AliasClientes <span class="dim">(0.3)</span></span><span class="m-badge">4</span></div>
+          <div class="m-item"><span>AliasLocalizaciones <span class="dim">(0.2)</span></span><span class="m-badge">5</span></div>
+          <div class="m-item"><span>BusCanarias <span class="dim">(3.07)</span></span><span class="m-badge">6</span></div>
+          <div class="m-item active"><span>OpenServBus <span class="dim">(3.53)</span></span><span class="m-badge">6</span></div>
+        </div>
+        <!-- main -->
+        <div class="m-main">
+          <div class="m-row">
+            <span class="m-h2">OpenServBus <span class="dim">(3.53)</span></span>
+            <span class="m-spacer"></span>
+            <span class="btn ghost">🧹 Limpiar</span>
+            <span class="btn red">▶ Ejecutar todos</span>
+          </div>
+
+          <div class="m-row" style="margin-top:.9rem">
+            <span class="m-folder">▾ main · deps: OpenServBus</span>
+            <span class="m-spacer"></span>
+            <span class="btn ghost">⊖ Colapsar Tests</span>
+            <span class="btn orange">▶ Ejecutar Tests en Carpeta (3)</span>
+            <span class="btn green">▶ Fichero a fichero</span>
+          </div>
+
+          <div class="m-card">
+            <div class="m-card-head">
+              <span>▾ ✎</span>
+              <span class="m-card-title">Avisos a usuarios</span>
+              <span class="m-file">(AdvertismentUserTest.php)</span>
+              <span class="m-chip">1 test</span>
+              <span class="m-spacer"></span>
+              <span class="btn ghost">&lt;/&gt; Ver código</span>
+              <span class="btn green">▶ Ejecutar</span>
+            </div>
+            <p class="m-desc">
+              Valida el modelo <code>AdvertismentUser</code>: al dar de baja un aviso
+              (<code>activo = false</code>) es obligatorio indicar el motivo de la baja.
+            </p>
+            <div class="m-method">
+              <div class="m-method-title">Requiere motivo baja</div>
+              <div class="m-method-desc">Al dar de baja sin motivo, <code>save()</code> falla y registra el error <code>record-is-not-active-specify-reason</code>.</div>
+            </div>
+          </div>
+
+          <div class="m-card">
+            <div class="m-card-head">
+              <span>▸ ✎</span>
+              <span class="m-card-title">Importación de repostajes — CSVimport activado</span>
+              <span class="m-file">(CsvImportPresentTest.php)</span>
+              <span class="m-chip">3 tests</span>
+              <span class="m-spacer"></span>
+              <span class="btn ghost">&lt;/&gt; Ver código</span>
+              <span class="btn green">▶ Ejecutar</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption>Vista de listado: barra lateral de plugins, escenarios (carpetas) y tarjetas de test con su descripción.</figcaption>
+  </figure>
+
+  <h3>La barra lateral</h3>
+  <ul>
+    <li><strong>FacturaScripts Core</strong> aparece siempre primero; su badge es el nº total de tests del core.</li>
+    <li>Cada plugin muestra su <strong>nombre y versión</strong> y un badge con el número de ficheros de test.</li>
+    <li>Haz clic en un plugin para cargar sus tests en el panel central.</li>
+  </ul>
+
+  <h3>Escenarios (carpetas de <code>Test/</code>)</h3>
+  <p>
+    Los tests de un plugin se agrupan por <strong>escenario</strong> — cada subcarpeta de
+    <code>Test/</code> con su propio juego de plugins activos. La cabecera del grupo indica las
+    dependencias que ese escenario activa, p. ej. <code>main · deps: OpenServBus</code> o
+    <code>with-csvimport · deps: OpenServBus,CSVimport</code>. Así conviven tests que requieren un
+    plugin con tests que comprueban su <em>ausencia</em>.
+  </p>
+
+  <!-- ========================================================= -->
+  <h2 id="ejecutar">4. Ejecutar tests: los cuatro modos</h2>
+  <p>Puedes lanzar los tests a cuatro niveles, de mayor a menor alcance:</p>
+  <ul class="legend">
+    <li><span class="k"><span class="btn red">▶ Ejecutar todos</span></span>
+      <span>(cabecera del plugin) — todos los tests del Core/Plugin. <em>Puede tardar mucho tiempo.</em></span></li>
+    <li><span class="k"><span class="btn orange">▶ Ejecutar Tests en Carpeta (N)</span></span>
+      <span>todos los tests de ese escenario en una sola ejecución. Rápido. <em>Puede tardar mucho.</em></span></li>
+    <li><span class="k"><span class="btn green">▶ Fichero a fichero</span></span>
+      <span>ejecuta la carpeta archivo por archivo: más lento en total, pero el resultado se va <strong>actualizando con más frecuencia</strong>.</span></li>
+    <li><span class="k"><span class="btn green">▶ Ejecutar</span></span>
+      <span>(en la tarjeta) — solo ese fichero de test. Lo habitual mientras desarrollas.</span></li>
+  </ul>
+  <div class="note">
+    Mientras hay una ejecución en marcha, la cabecera muestra <strong>⟳ Ejecutando…</strong> y una
+    barra de progreso azul en la parte superior. Con <span class="btn ghost">⊕ Expandir Tests</span>
+    /<span class="btn ghost">⊖ Colapsar Tests</span> abres o cierras todas las tarjetas de un escenario.
+  </div>
+
+  <!-- ========================================================= -->
+  <h2 id="resultados">5. Leer los resultados</h2>
+  <p>
+    Al ejecutar, la tarjeta despliega un panel <strong>«Resumen y salida de PHPUnit»</strong> con las
+    cifras de la ejecución y, debajo, el <strong>estado de cada método</strong> de test. La cabecera
+    de la tarjeta muestra además un resumen tipo <span class="m-chip ok">3/3 OK · 9 ms</span>.
+  </p>
+
+  <figure>
+    <div class="mock">
+      <div class="m-topbar">
+        <h4>Tests de plugins · Mesa FS</h4>
+        <div class="m-meta">6 plugins · 126 ficheros de test · core <b>v2026.3</b> · entorno <b>v2.0.0</b></div>
+      </div>
+      <div class="m-body">
+        <div class="m-side">
+          <div class="m-item core"><span>⚙ <b>FacturaScripts Core</b></span><span class="m-badge">1080</span></div>
+          <div class="m-item active"><span>OpenServBus <span class="dim">(3.53)</span></span><span class="m-badge">6</span></div>
+        </div>
+        <div class="m-main">
+          <div class="m-card">
+            <div class="m-card-head">
+              <span>▾ ✎</span>
+              <span class="m-card-title">Importación de repostajes — CSVimport activado</span>
+              <span class="m-file">(CsvImportPresentTest.php)</span>
+              <span class="m-chip">3 tests</span>
+              <span class="m-chip ok">3/3 OK · 9 ms</span>
+              <span class="m-spacer"></span>
+              <span class="btn ghost">&lt;/&gt; Ver código</span>
+              <span class="btn green">▶ Ejecutar</span>
+            </div>
+
+            <div class="m-summary">
+              <div class="m-file-line">▾ Resumen y salida de PHPUnit</div>
+              <div class="m-file-line m-mono">CsvImportPresentTest.php · 3 tests</div>
+              <div class="m-stats">
+                <span class="m-stat ok">3 OK</span>
+                <span class="m-stat fail">0 fallos</span>
+                <span class="m-stat">0 omitidos</span>
+                <span class="m-stat">6 aserciones</span>
+                <span class="m-stat">9 ms</span>
+              </div>
+              <div class="m-details">▸ Salida cruda de PHPUnit</div>
+            </div>
+
+            <div class="m-result">
+              <span class="m-time">1 asrt · 8 ms</span>
+              <span class="m-badge-ok">OK</span>
+              <span class="m-mono"> testDetectionMatchesEnabledState</span>
+              <div class="m-method-desc">La disponibilidad de la importación debe coincidir con el estado «activado» del plugin.</div>
+            </div>
+            <div class="m-result">
+              <span class="m-time">3 asrt · 1 ms</span>
+              <span class="m-badge-ok">OK</span>
+              <span class="m-mono"> testImportEnabledWhenCsvImportEnabled</span>
+              <div class="m-method-desc">Con CSVimport activado, la importación de repostajes debe estar disponible.</div>
+            </div>
+            <div class="m-result">
+              <span class="m-time">2 asrt · 0 ms</span>
+              <span class="m-badge-ok">OK</span>
+              <span class="m-mono"> testInitRegistersFuelKmTemplate</span>
+              <div class="m-method-desc">Init::init() registra la plantilla manual «FuelKm» en CSVfile cuando CSVimport está activado.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <figcaption>Vista de resultados: resumen (OK / fallos / omitidos / aserciones / tiempo), salida cruda desplegable y estado por método.</figcaption>
+  </figure>
+
+  <h3>Qué significa cada cifra</h3>
+  <ul>
+    <li><strong>OK</strong> — tests que pasaron. <strong>Fallos</strong> — aserciones incumplidas o errores. <strong>Omitidos</strong> — tests marcados <em>skipped</em>.</li>
+    <li><strong>Aserciones</strong> — nº total de comprobaciones. <strong>ms</strong> — tiempo de la ejecución.</li>
+    <li><strong>▸ Salida cruda de PHPUnit</strong> — despliega la salida original de PHPUnit (útil para depurar un fallo).</li>
+    <li>Cada método muestra su badge <span class="m-badge-ok" style="padding:.05rem .4rem;border-radius:4px">OK</span>/FAIL, nombre, nº de aserciones y tiempo.</li>
+  </ul>
+  <div class="note">
+    <span class="btn ghost">🧹 Limpiar</span> oculta y vacía todos los paneles de resultados y
+    reinicia los contadores, dejando el listado como al principio.
+  </div>
+
+  <!-- ========================================================= -->
+  <h2 id="codigo">6. Ver el código de un test</h2>
+  <p>
+    El botón <span class="btn ghost">&lt;/&gt; Ver código</span> de cada tarjeta despliega el
+    código fuente completo del <code>*Test.php</code> (resaltado), en el mismo panel de la tarjeta,
+    sin abandonar la página. Útil para revisar qué hace exactamente un test antes de ejecutarlo.
+  </p>
+
+  <!-- ========================================================= -->
+  <h2 id="descripciones">7. De dónde salen las descripciones</h2>
+  <p>
+    Los textos legibles de cada tarjeta y de cada método no son mágicos: salen del
+    <strong>docblock</strong> del propio <code>*Test.php</code>. El runner los renderiza como markdown:
+  </p>
+  <ul>
+    <li>Si el docblock tiene un bloque <code>@description</code>, se usa solo ese texto (hasta el siguiente <code>@tag</code>).</li>
+    <li>Si no, se usa todo el docblock (ignorando líneas de <code>@tag</code>).</li>
+    <li>Si la descripción de la clase empieza por un encabezado markdown (<code>## …</code>), ese texto se convierte en el <strong>título de la tarjeta</strong> (con el nombre del fichero entre paréntesis).</li>
+    <li>Cada método de test puede llevar su propia descripción en su docblock.</li>
+  </ul>
+  <p>El detalle de esta convención, con ejemplos de docblock, está en el <code>README.md</code>.</p>
+
+  <!-- ========================================================= -->
+  <h2 id="cli">8. Alternativa por línea de comandos</h2>
+  <p>Si prefieres la terminal, los mismos tests se ejecutan con PHPUnit:</p>
+  <pre><code>cd &lt;TESTENV_DIR&gt;            # p. ej. test-env/facturascripts
+vendor/bin/phpunit Plugins/&lt;Plugin&gt;/Test</code></pre>
+  <p>
+    El runner web es solo una capa cómoda sobre esta misma ejecución; ambos corren contra el mismo
+    entorno de pruebas provisionado.
+  </p>
+
+  <footer class="doc">
+    Manual de uso de <span class="mono">fs-test-env</span>. Para instalación, configuración y scripts,
+    consulta el <span class="mono">README.md</span> del repositorio.
+  </footer>
+
+</div>
+</body>
+</html>
