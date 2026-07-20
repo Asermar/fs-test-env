@@ -34,6 +34,18 @@ TEST_WEB_URL="${TEST_WEB_URL:-}"
 CORE_REPO="${CORE_REPO:-git@github.com:NeoRazorX/facturascripts.git}"
 . "$SCRIPT_DIR/branch-helpers.sh"
 
+# --- salida de progreso (coloreada + con hora) -------------------------------
+# La ventana de salida de OkoGit no es un TTY pero renderiza ANSI: emitimos color
+# por defecto (se desactiva con NO_COLOR). Los printf de bash se vuelcan al
+# instante, así el progreso se ve aunque git/composer/php bufericen su salida.
+if [ -n "${NO_COLOR:-}" ]; then
+    C_RESET='' C_STEP='' C_OK=''
+else
+    C_RESET=$'\033[0m'; C_STEP=$'\033[1;36m'; C_OK=$'\033[1;32m'
+fi
+log_step() { printf '%s[%s] >> %s%s\n' "$C_STEP" "$(date +%H:%M:%S)" "$*" "$C_RESET"; }
+log_ok()   { printf '%s[%s] OK %s%s\n' "$C_OK" "$(date +%H:%M:%S)" "$*" "$C_RESET"; }
+
 # --- dependencias de sistema ---
 for bin in git composer php; do
     command -v "$bin" >/dev/null 2>&1 || { echo "ERROR: falta '$bin' en el sistema." >&2; exit 1; }
@@ -42,7 +54,7 @@ done
 [ -x "$PROVISION" ] || { echo "ERROR: no existe o no es ejecutable $PROVISION" >&2; exit 1; }
 
 # --- extensiones PHP requeridas por el core (composer + conexión a BD) ---
-echo ">> Comprobando extensiones PHP..."
+log_step "Comprobando extensiones PHP..."
 PHP_VER="$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')"
 # mapa extensión -> paquete apt (mysqli lo provee phpX.Y-mysql)
 declare -A EXT_PKG=(
@@ -143,6 +155,7 @@ read -rp "¿Continuar? [s/N]: " ok
 [ "$ok" = "s" ] || [ "$ok" = "S" ] || { echo "Cancelado."; exit 0; }
 
 # --- 4) delegamos la provisión real (no interactiva) ---
+log_step "Lanzando provisión del entorno (clonar core, composer, esquema)..."
 CORE_REPO="$CORE_REPO" CORE_BRANCH="$CORE_BRANCH" TEST_DB="$TEST_DB" \
     ENABLE_LIST="$ENABLE_LIST" "$PROVISION"
 

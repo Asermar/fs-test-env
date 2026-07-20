@@ -47,6 +47,27 @@ TEST_DB="${TEST_DB:-fs_test}"
 FS_LANG="${FS_LANG:-es_ES}"
 FS_TIMEZONE="${FS_TIMEZONE:-UTC}"
 
+# --- salida de progreso (coloreada + con hora) -------------------------------
+# Emitimos siempre color por defecto: la ventana de salida de OkoGit no es un TTY
+# (así que no podemos gatear el color con [ -t 1 ]) pero sí renderiza ANSI. Se
+# desactiva con NO_COLOR (convención estándar).
+if [ -n "${NO_COLOR:-}" ]; then
+    C_RESET='' C_STEP='' C_OK='' C_WARN='' C_ERR='' C_DIM=''
+else
+    C_RESET=$'\033[0m'; C_STEP=$'\033[1;36m'; C_OK=$'\033[1;32m'
+    C_WARN=$'\033[1;33m'; C_ERR=$'\033[1;31m'; C_DIM=$'\033[2m'
+fi
+# printf de bash se vuelca al instante aunque la salida esté redirigida a un pipe
+# (no hay buffering de bloque como en git/composer/php), así cada marcador aparece
+# en OkoGit en cuanto se ejecuta la fase.
+log_step() { printf '%s[%s] >> %s%s\n' "$C_STEP" "$(date +%H:%M:%S)" "$*" "$C_RESET"; }
+log_ok()   { printf '%s[%s] OK %s%s\n' "$C_OK" "$(date +%H:%M:%S)" "$*" "$C_RESET"; }
+log_warn() { printf '%s[%s] !! %s%s\n' "$C_WARN" "$(date +%H:%M:%S)" "$*" "$C_RESET"; }
+log_info() { printf '   %s%s%s\n' "$C_DIM" "$*" "$C_RESET"; }
+# stdbuf -oL/-eL fuerza a git/composer/php a volcar por líneas cuando la salida no
+# es un TTY, de modo que su progreso se ve en vivo (si stdbuf no está, no pasa nada).
+if command -v stdbuf >/dev/null 2>&1; then STDBUF=(stdbuf -oL -eL); else STDBUF=(); fi
+
 # --- dependencias de sistema ---
 # git es OPCIONAL: en el contenedor podman la imagen no lo trae, pero el core ya
 # viene clonado en el host y montado, así que basta con saltarse el clone/pull.
@@ -69,17 +90,17 @@ if [ "$TEST_DB" = "$DB_WORK" ]; then
     exit 1
 fi
 
-echo "================================================================"
-echo "Provisión del entorno de pruebas"
+printf '%s================================================================%s\n' "$C_STEP" "$C_RESET"
+printf '%sProvisión del entorno de pruebas%s\n' "$C_STEP" "$C_RESET"
 echo "Core    : $CORE_REPO ($CORE_BRANCH)"
 echo "Destino : $TESTENV_DIR"
 echo "BD test : $TEST_DB @ $DB_HOST:$DB_PORT (user $DB_USER)"
-echo "================================================================"
+printf '%s================================================================%s\n' "$C_STEP" "$C_RESET"
 
 # --- 1) clonar o actualizar el core (requiere git) ---
 if command -v git >/dev/null 2>&1; then
     if [ -d "$TESTENV_DIR/.git" ]; then
-        echo ">> Actualizando core existente..."
+        log_step "Actualizando core existente..."
         git -C "$TESTENV_DIR" checkout -- Test/bootstrap.php 2>/dev/null || true
         # revertimos también install-plugins.php (lo regeneramos más abajo) para que
         # el pull --ff-only no falle por cambios locales sobre un archivo del core.
@@ -91,12 +112,14 @@ if command -v git >/dev/null 2>&1; then
             git -C "$TESTENV_DIR" pull --ff-only origin "$CORE_BRANCH"
         fi
     else
-        echo ">> Clonando core..."
+        log_step "Clonando core ($CORE_BRANCH)... (puede tardar varios minutos)"
         mkdir -p "$(dirname "$TESTENV_DIR")"
-        git clone --branch "$CORE_BRANCH" "$CORE_REPO" "$TESTENV_DIR"
+        # --progress: sin él, git no emite progreso cuando la salida no es un TTY
+        # (como la ventana de OkoGit), y el clone parecería colgado.
+        git clone --progress --branch "$CORE_BRANCH" "$CORE_REPO" "$TESTENV_DIR"
     fi
 elif [ -f "$TESTENV_DIR/Core/Kernel.php" ]; then
-    echo ">> git no disponible; uso el core ya presente en $TESTENV_DIR (montado del host)."
+    log_step "git no disponible; uso el core ya presente en $TESTENV_DIR (montado del host)."
 else
     echo "ERROR: falta git y no hay un core en $TESTENV_DIR." >&2
     echo "       Provisiona primero en el host con bin/setup-test-env.sh." >&2
@@ -107,14 +130,15 @@ fi
 # Si el vendor ya está (montado del host), lo reutilizamos: así no necesitamos
 # git/red dentro del contenedor.
 if [ -f "$TESTENV_DIR/vendor/bin/phpunit" ]; then
-    echo ">> vendor ya presente; omito composer install."
+    log_step "vendor ya presente; omito composer install."
 else
-    echo ">> composer install..."
-    ( cd "$TESTENV_DIR" && composer install --no-interaction )
+    log_step "composer install... (puede tardar; descarga dependencias)"
+    # stdbuf -oL + --no-progress: salida por líneas para que se vea avanzar en OkoGit.
+    ( cd "$TESTENV_DIR" && "${STDBUF[@]}" composer install --no-interaction --no-progress )
 fi
 
 # --- 3) crear la BD de pruebas si no existe ---
-echo ">> Creando BD de pruebas (si falta)..."
+log_step "Creando BD de pruebas (si falta)..."
 php -r '
 $m = new mysqli($argv[1], $argv[3], $argv[4], "", (int)$argv[2]);
 if ($m->connect_errno) { fwrite(STDERR, "conexion: ".$m->connect_error."\n"); exit(1); }
@@ -124,7 +148,7 @@ echo "   BD lista: $argv[5]\n";
 ' "$DB_HOST" "$DB_PORT" "$DB_USER" "$DB_PASS" "$TEST_DB"
 
 # --- 4) config.php del core apuntando a la BD de pruebas ---
-echo ">> Escribiendo config.php de pruebas..."
+log_step "Escribiendo config.php de pruebas..."
 cat > "$TESTENV_DIR/config.php" <<PHP
 <?php
 define('FS_COOKIES_EXPIRE', 31536000);
@@ -145,7 +169,7 @@ define('FS_DEBUG', true);
 PHP
 
 # --- 5) enlazar los plugins ---
-echo ">> Enlazando plugins..."
+log_step "Enlazando plugins..."
 mkdir -p "$TESTENV_DIR/Plugins"
 LINKED=()
 for dir in "$PLUGINS_SRC"/*/; do
@@ -164,7 +188,7 @@ fi
 # deps transitivas): Plugins::enable() falla si las dependencias no están aún
 # activadas, así que cada una debe ir antes que el plugin que la necesita.
 ENABLE_LIST="$(php "$SCRIPT_DIR/plugin-topo-order.php" "$PLUGINS_SRC" "$ENABLE_LIST")"
-echo ">> Plugins a activar (orden por dependencias): $ENABLE_LIST"
+log_step "Plugins a activar (orden por dependencias): $ENABLE_LIST"
 
 mkdir -p "$TESTENV_DIR/Test/Plugins"
 echo "$ENABLE_LIST" > "$TESTENV_DIR/Test/Plugins/install-plugins.txt"
@@ -173,14 +197,14 @@ echo "$ENABLE_LIST" > "$TESTENV_DIR/Test/Plugins/install-plugins.txt"
 # Test/Plugins/install-plugins.txt). Ver la orquestación al final del script.
 
 warmup_schema() {
-    echo ">> Construyendo esquema de la BD de pruebas (warm-up)..."
+    log_step "Construyendo esquema de la BD de pruebas (warm-up)..."
     ( cd "$TESTENV_DIR" && php warmup-schema.php 2>/dev/null )
 }
 
 # --- 7) parchear el bootstrap de tests (cargar extensiones de plugins) ---
 BOOTSTRAP="$TESTENV_DIR/Test/bootstrap.php"
 if [ -f "$BOOTSTRAP" ] && ! grep -q "Plugins::init()" "$BOOTSTRAP"; then
-    echo ">> Parcheando Test/bootstrap.php (Plugins::init)..."
+    log_step "Parcheando Test/bootstrap.php (Plugins::init)..."
     cat >> "$BOOTSTRAP" <<'PHP'
 
 // inicializamos los plugins para que carguen sus extensiones (mods de modelos,
@@ -190,7 +214,7 @@ PHP
 fi
 
 # --- 8) config de PHPUnit para la web (ejecuta TODOS los casos, sin parar) ---
-echo ">> Generando phpunit-webrunner.xml..."
+log_step "Generando phpunit-webrunner.xml..."
 cat > "$TESTENV_DIR/phpunit-webrunner.xml" <<'XML'
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Generado por bin/test-env-provision.sh para el runner web.
@@ -239,14 +263,17 @@ if (!file_exists($config)) {
 }
 require_once $config;
 
+// FK desactivadas ANTES de Plugins::init(): el Init::update() de algunos plugins
+// instancia modelos que crean sus tablas con las FK activas y, en una BD recién
+// creada, fallaría por el orden (una tabla referencia otra que aún no existe).
+$db = new DataBase();
+$db->connect();
+$db->exec('SET FOREIGN_KEY_CHECKS=0');
+
 Cache::clear();
 Kernel::init();
 Plugins::init();
 Plugins::deploy();
-
-$db = new DataBase();
-$db->connect();
-$db->exec('SET FOREIGN_KEY_CHECKS=0');
 
 $ok = 0;
 $fail = 0;
@@ -276,7 +303,7 @@ PHP
 # Reemplaza al de core (que solo activa). Deja los plugins activos EXACTAMENTE igual a la
 # lista de Test/Plugins/install-plugins.txt: desactiva lo que sobre y activa lo que falte.
 # Así install-plugins.txt es autoritativo por juego de tests (soporta tests de ausencia).
-echo ">> Generando Test/install-plugins.php (sync)..."
+log_step "Generando Test/install-plugins.php (sync)..."
 cat > "$TESTENV_DIR/Test/install-plugins.php" <<'PHP'
 <?php
 // Sincroniza los plugins activos con la lista EXACTA de Test/Plugins/install-plugins.txt.
@@ -344,21 +371,25 @@ PHP
 #    propósito: algunos plugins ejecutan en su post-enable código que necesita el esquema
 #    ya creado (p.ej. BusImportacion guarda EmailNotification); no se activan en la 1ª
 #    ronda (la tabla aún no existe), el warm-up las crea y la 2ª ronda los activa.
-echo ">> Construyendo esquema (activar todos + warm-up, 2 rondas)..."
+log_step "Construyendo esquema (activar todos + warm-up, 2 rondas)..."
 echo "$ENABLE_LIST" > "$TESTENV_DIR/Test/Plugins/install-plugins.txt"
+# Estas activaciones son el tramo más largo y antes iba en silencio absoluto
+# (>/dev/null): marcamos cada ronda para que se vea el avance en OkoGit.
+log_step "Esquema · ronda 1/2: activando plugins (esto tarda)..."
 ( cd "$TESTENV_DIR" && php Test/install-plugins.php >/dev/null 2>&1 ) || true
 warmup_schema
+log_step "Esquema · ronda 2/2: activando plugins..."
 ( cd "$TESTENV_DIR" && php Test/install-plugins.php >/dev/null 2>&1 ) || true
 warmup_schema
 
 # 2) Pizarra limpia: sincronizamos a lista VACÍA => se desactivan todos los plugins.
 #    Las tablas creadas en el warm-up permanecen; cada juego de tests activará luego
 #    exactamente los plugins de su install-plugins.txt.
-echo ">> Dejando todos los plugins desactivados (pizarra limpia)..."
+log_step "Dejando todos los plugins desactivados (pizarra limpia)..."
 : > "$TESTENV_DIR/Test/Plugins/install-plugins.txt"
 ( cd "$TESTENV_DIR" && php Test/install-plugins.php >/dev/null 2>&1 ) || true
 
 echo
-echo "================================================================"
-echo "Entorno de pruebas listo en: $TESTENV_DIR"
-echo "================================================================"
+printf '%s================================================================%s\n' "$C_OK" "$C_RESET"
+log_ok "Entorno de pruebas listo en: $TESTENV_DIR"
+printf '%s================================================================%s\n' "$C_OK" "$C_RESET"
