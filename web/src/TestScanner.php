@@ -13,6 +13,8 @@ require_once __DIR__ . '/TestDoc.php';
 
 class TestScanner
 {
+    /** @var string Raíz del proyecto (donde vive .idea/okogit.xml, si existe). */
+    private $baseDir;
     /** @var string Ruta a la carpeta Plugins del proyecto. */
     private $pluginsDir;
     /** @var string Raíz del core de pruebas (test-env/facturascripts). */
@@ -22,6 +24,7 @@ class TestScanner
     {
         // layout del core dentro del proyecto (Mesa_FS usa 'src'; FS estándar '.').
         $coreDir = getenv('FS_CORE_DIR') ?: 'src';
+        $this->baseDir = $baseDir;
         $this->pluginsDir = $baseDir . '/' . $coreDir . '/Plugins';
         $this->fsDir = getenv('TESTENV_DIR') ?: $baseDir . '/test-env/facturascripts';
     }
@@ -36,7 +39,7 @@ class TestScanner
     public function core(): array
     {
         $testDir = $this->fsDir . '/Test/Core';
-        $result = ['plugin' => 'FacturaScripts Core', 'isCore' => true, 'subs' => [], 'total' => 0, 'tests' => 0];
+        $result = ['plugin' => 'FacturaScripts Core', 'isCore' => true, 'isLeader' => false, 'group' => null, 'subs' => [], 'total' => 0, 'tests' => 0];
         if (!is_dir($testDir)) {
             return $result;
         }
@@ -301,6 +304,8 @@ class TestScanner
             return $result;
         }
 
+        $groups = $this->okogitGroups(); // grupos líder/hijo de OkoGit (vacío si no hay)
+
         foreach (scandir($this->pluginsDir) as $plugin) {
             if ($plugin === '.' || $plugin === '..') {
                 continue;
@@ -368,6 +373,8 @@ class TestScanner
             $result[] = [
                 'plugin' => $plugin,
                 'version' => $this->pluginVersion($plugin),
+                'isLeader' => $groups[$plugin]['isLeader'] ?? false,
+                'group' => $groups[$plugin]['group'] ?? null,
                 'subs' => $subs,
                 'total' => $total,
                 'tests' => $tests,
@@ -375,6 +382,87 @@ class TestScanner
         }
 
         return $result;
+    }
+
+    /**
+     * Lee los grupos líder/hijo de OkoGit desde .idea/okogit.xml (si existe). OkoGit es un
+     * plugin OPCIONAL del IDE: su ausencia (u otro proyecto de la flota sin él) NO debe dar
+     * error, solo hace que todos los plugins salgan como independientes.
+     *
+     * Devuelve un mapa: nombrePlugin => ['isLeader' => bool, 'group' => string|null], donde
+     * 'group' es el nombre del plugin líder del grupo (él mismo si es líder, su líder si es
+     * hijo) o null si es independiente.
+     *
+     * @return array<string, array{isLeader:bool, group:string|null}>
+     */
+    private function okogitGroups(): array
+    {
+        $path = $this->baseDir . '/.idea/okogit.xml';
+        if (!is_file($path)) {
+            return [];
+        }
+
+        try {
+            $prev = libxml_use_internal_errors(true);
+            $xml = @simplexml_load_file($path);
+            libxml_use_internal_errors($prev);
+            if ($xml === false) {
+                return [];
+            }
+
+            // localizar el nodo <component name="OkoGitProjectSettings"> y su <groups>.
+            $entries = null;
+            foreach ($xml->component as $component) {
+                if ((string)$component['name'] === 'OkoGitProjectSettings') {
+                    $entries = $component->groups->RepoGroupEntry ?? null;
+                    break;
+                }
+            }
+            if (empty($entries)) {
+                return [];
+            }
+
+            // primera pasada: recoger, por plugin, si es líder y la ruta de su líder.
+            $leaders = [];       // nombrePlugin => true
+            $childLeaderPath = []; // nombrePlugin => nombreLider
+            foreach ($entries as $entry) {
+                $pluginPath = '';
+                $isLeader = false;
+                $leaderPath = '';
+                foreach ($entry->option as $option) {
+                    $name = (string)$option['name'];
+                    $value = (string)$option['value'];
+                    if ($name === 'path') {
+                        $pluginPath = $value;
+                    } elseif ($name === 'leader' && $value === 'true') {
+                        $isLeader = true;
+                    } elseif ($name === 'leaderPath') {
+                        $leaderPath = $value;
+                    }
+                }
+                if ($pluginPath === '') {
+                    continue;
+                }
+                $plugin = basename($pluginPath);
+                if ($isLeader) {
+                    $leaders[$plugin] = true;
+                } elseif ($leaderPath !== '') {
+                    $childLeaderPath[$plugin] = basename($leaderPath);
+                }
+            }
+
+            // segunda pasada: componer el mapa final.
+            $groups = [];
+            foreach ($leaders as $plugin => $_) {
+                $groups[$plugin] = ['isLeader' => true, 'group' => $plugin];
+            }
+            foreach ($childLeaderPath as $plugin => $leader) {
+                $groups[$plugin] = ['isLeader' => false, 'group' => $leader];
+            }
+            return $groups;
+        } catch (\Throwable $e) {
+            return [];
+        }
     }
 
     /** Versión del plugin leída de su facturascripts.ini (o '' si no se encuentra). */

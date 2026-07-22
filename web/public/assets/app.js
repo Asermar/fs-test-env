@@ -4,6 +4,32 @@ const PLUGINS = window.__PLUGINS__ || [];
 const sidebar = document.getElementById('sidebar');
 const content = document.getElementById('content');
 
+// orden de plugins en el lateral (líder seguido de sus hijos) y miembros por grupo
+// (nombreLíder -> [líder, ...hijos]). Se rellenan en renderSidebar. Si OkoGit no está
+// presente, ORDERED conserva el orden original y GROUP_MEMBERS queda vacío.
+let ORDERED = [];
+const GROUP_MEMBERS = {};
+
+// Ordena los plugins agrupando cada líder con sus hijos. Core(s) primero; luego cada líder
+// (en orden original) seguido de sus hijos; al final, independientes y huérfanos.
+function orderPlugins(list) {
+    const core = list.filter(p => p.isCore);
+    const rest = list.filter(p => !p.isCore);
+    const out = [];
+    const done = new Set();
+    for (const leader of rest.filter(p => p.isLeader)) {
+        out.push(leader);
+        done.add(leader);
+        const kids = rest.filter(p => !p.isLeader && p.group === leader.plugin);
+        GROUP_MEMBERS[leader.plugin] = [leader, ...kids];
+        for (const k of kids) { out.push(k); done.add(k); }
+    }
+    for (const p of rest) {
+        if (!done.has(p)) out.push(p);
+    }
+    return core.concat(out);
+}
+
 // --- indicador global de "trabajando" (barra superior + aviso en la cabecera) ---
 let busyCount = 0;
 function busyInc() {
@@ -67,27 +93,116 @@ function renderSidebar() {
         sidebar.appendChild(el('div', { class: 'placeholder', text: 'Ningún plugin con tests.' }));
         return;
     }
+
+    ORDERED = orderPlugins(PLUGINS);
+
+    // --- barra de herramientas: selección múltiple + ejecución en lote ---
+    const selCount = el('span', { class: 'sel-count' });
+    const allBtn = el('button', { class: 'ghost', text: 'Todos' });
+    const noneBtn = el('button', { class: 'ghost', text: 'Ninguno' });
+    const clearAllBtn = el('button', { class: 'ghost', text: '🧹 Limpiar', title: 'Borra los contadores de resultados de todos los plugins' });
+    const runSelBtn = el('button', { class: 'run', title: 'Ejecuta, fichero a fichero, los tests de todos los plugins marcados' });
+    const status = el('div', { class: 'batch-status' });
+    const tools = el('div', { class: 'sidebar-tools' }, [
+        el('div', { class: 'tools-row' }, [allBtn, noneBtn, clearAllBtn, selCount]),
+        runSelBtn,
+        status
+    ]);
+    sidebar.appendChild(tools);
+    clearAllBtn.addEventListener('click', () => { clearAll(); status.textContent = ''; });
+
+    const updateSelCount = () => {
+        const n = ORDERED.filter(p => p._cb && p._cb.checked).length;
+        selCount.textContent = n + ' sel.';
+        runSelBtn.textContent = '▶ Ejecutar seleccionados' + (n ? ' (' + n + ')' : '');
+        runSelBtn.disabled = n === 0;
+    };
+    const setAll = (checked) => {
+        for (const p of ORDERED) if (p._cb) p._cb.checked = checked;
+        updateSelCount();
+    };
+    allBtn.addEventListener('click', () => setAll(true));
+    noneBtn.addEventListener('click', () => setAll(false));
+
     let firstItem = null, firstPlugin = null;
-    for (const p of PLUGINS) {
+    for (const p of ORDERED) {
         const badge = el('span', { class: 'badge' });
         p._badge = badge;               // referencia para actualizar el contador al ejecutar
         p._runTotals = {};              // clave de unidad ejecutada -> {pass, fail}
         updatePluginBadge(p);           // pinta el nº de tests existentes
-        const head = el('div', { class: 'plugin-head' }, [
-            el('span', {}, [
-                p.isCore ? el('span', { class: 'core-mark', text: '⚙ ' }) : null,
-                p.plugin,
-                p.version ? el('span', { class: 'plugin-ver', text: ' (' + p.version + ')' }) : null
-            ]),
-            badge
+
+        const cb = el('input', { type: 'checkbox', class: 'plugin-cb', title: 'Marcar para ejecución en lote' });
+        cb.addEventListener('change', updateSelCount);
+        p._cb = cb;
+
+        // marcador: ⚙ core · ★ líder · ↳ hijo · (nada) independiente
+        let mark = null;
+        if (p.isCore) mark = el('span', { class: 'core-mark', text: '⚙ ' });
+        else if (p.isLeader) mark = el('span', { class: 'group-mark leader', text: '★ ' });
+        else if (p.group) mark = el('span', { class: 'group-mark child', text: '↳ ' });
+
+        const nameSpan = el('span', { class: 'plugin-name' }, [
+            mark,
+            p.plugin,
+            p.version ? el('span', { class: 'plugin-ver', text: ' (' + p.version + ')' }) : null
         ]);
-        const item = el('div', { class: 'plugin-item' + (p.isCore ? ' is-core' : '') }, [head]);
-        head.addEventListener('click', () => selectPlugin(p, item));
+
+        const headChildren = [cb, nameSpan];
+        // botón "+ hijos" solo en líderes con hijos: marca/desmarca todo el grupo.
+        if (p.isLeader && (GROUP_MEMBERS[p.plugin] || []).length > 1) {
+            const groupBtn = el('button', { class: 'ghost group-btn', text: '+ hijos', title: 'Marcar/desmarcar el líder y sus plugins hijos' });
+            groupBtn.addEventListener('click', () => {
+                const members = GROUP_MEMBERS[p.plugin] || [];
+                const allChecked = members.every(m => m._cb && m._cb.checked);
+                for (const m of members) if (m._cb) m._cb.checked = !allChecked;
+                updateSelCount();
+            });
+            headChildren.push(groupBtn);
+        }
+        headChildren.push(badge);
+
+        const head = el('div', { class: 'plugin-head' }, headChildren);
+        const item = el('div', {
+            class: 'plugin-item' + (p.isCore ? ' is-core' : '') + (p.group && !p.isLeader ? ' is-child' : '')
+        }, [head]);
+        // pinchar en la fila selecciona el plugin, salvo si el click viene del checkbox o de un botón.
+        head.addEventListener('click', (e) => {
+            if (e.target.closest('.plugin-cb, button')) return;
+            selectPlugin(p, item);
+        });
+        p._item = item;
         sidebar.appendChild(item);
         if (!firstItem) { firstItem = item; firstPlugin = p; }
     }
+
+    updateSelCount();
+    runSelBtn.addEventListener('click', () => runSelected(runSelBtn, status));
+
     // seleccionamos el primer plugin para que los tests se vean al entrar
     if (firstItem) selectPlugin(firstPlugin, firstItem);
+}
+
+// Ejecuta en lote, fichero a fichero, los tests de todos los plugins marcados. Abre cada
+// plugin en el panel derecho al ejecutarlo (progreso en vivo) y deja el resumen ✓/✗ en el
+// badge del lateral de cada uno (persiste al cambiar de vista).
+async function runSelected(btn, status) {
+    const marked = ORDERED.filter(p => p._cb && p._cb.checked);
+    if (!marked.length) return;
+    btn.disabled = true;
+    busyInc();
+    try {
+        let i = 0;
+        for (const p of marked) {
+            status.textContent = `Ejecutando ${++i}/${marked.length}: ${p.plugin}`;
+            selectPlugin(p, p._item);      // renderiza la vista y fija p._runAll
+            if (p._runAll) await p._runAll();
+        }
+        const n = marked.length;
+        status.textContent = `Hecho: ${n} plugin${n > 1 ? 's' : ''} ejecutado${n > 1 ? 's' : ''}`;
+    } finally {
+        busyDec();
+        btn.disabled = false;
+    }
 }
 
 // Pinta el badge del lateral: nº de ficheros de test y, si ya se han ejecutado,
@@ -104,7 +219,9 @@ function updatePluginBadge(p) {
     if (any) {
         badge.appendChild(el('span', { class: 'badge-pass', text: '✓' + pass + '/' + total }));
         if (fail > 0) {
-            badge.appendChild(el('span', { class: 'badge-fail', text: '✗' + fail + '/' + total }));
+            const failBadge = el('span', { class: 'badge-fail', text: '✗' + fail + '/' + total, title: 'Ver los tests fallidos' });
+            failBadge.addEventListener('click', (e) => { e.stopPropagation(); revealFailures(p); });
+            badge.appendChild(failBadge);
         }
     }
 }
@@ -112,16 +229,55 @@ function updatePluginBadge(p) {
 function selectPlugin(p, item) {
     document.querySelectorAll('.plugin-item.active').forEach(n => n.classList.remove('active'));
     item.classList.add('active');
-    renderPluginView(p);
+    // la vista se construye una vez y se cachea: así los resultados de cada fichero/carpeta
+    // sobreviven al cambiar de plugin (hasta la siguiente ejecución o hasta limpiar).
+    if (!p._view) p._view = renderPluginView(p);
+    content.innerHTML = '';
+    content.appendChild(p._view);
+}
+
+// Selecciona el plugin y abre/expande sus tests fallidos (para llegar a ellos desde el
+// contador ✗ del lateral). Aprovecha que la vista está cacheada y conserva los resultados.
+function revealFailures(p) {
+    selectPlugin(p, p._item);
+    const view = p._view;
+    if (!view) return;
+    const failed = view.querySelectorAll('.case.fail, .case.error');
+    let first = null;
+    failed.forEach(c => {
+        const block = c.closest('.sub-block');
+        if (block) {
+            const body = block.querySelector('.sub-body');
+            if (body) body.classList.remove('collapsed');
+            const caret = block.querySelector('.folder-caret');
+            if (caret) caret.textContent = '▾';
+        }
+        const card = c.closest('.test-card');
+        if (card) card.classList.remove('collapsed');
+        const det = c.closest('details.result-slot');
+        if (det) { det.hidden = false; det.open = true; }
+        if (c.classList.contains('has-detail')) c.classList.add('open');
+        if (!first) first = c;
+    });
+    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// Limpia los contadores/resultados de todos los plugins (los del lateral y los de cada vista
+// ya construida). Los que nunca se abrieron solo necesitan resetear su contador.
+function clearAll() {
+    for (const p of ORDERED) {
+        if (p._clear) p._clear();
+        else { p._runTotals = {}; updatePluginBadge(p); }
+    }
 }
 
 // --- main content: plugin view ---
 function renderPluginView(p) {
-    content.innerHTML = '';
+    const view = el('div', { class: 'plugin-view' });
 
     const runAllBtn = el('button', { class: 'run danger', text: '▶ Ejecutar todos', title: 'Se ejecutan todos los test del Core/Plugin. Puede tardar mucho tiempo' });
     const clearBtn = el('button', { class: 'ghost', text: '🧹 Limpiar' });
-    content.appendChild(el('div', { class: 'content-head' }, [
+    view.appendChild(el('div', { class: 'content-head' }, [
         el('h2', {}, [
             p.isCore ? el('span', { class: 'core-mark', text: '⚙ ' }) : null,
             p.plugin,
@@ -319,26 +475,11 @@ function renderPluginView(p) {
             subBody.appendChild(subSlot.details); // resultados de "carpeta" (core), tras las tarjetas
         }
         block.appendChild(subBody);
-        content.appendChild(block);
+        view.appendChild(block);
     }
 
-    runAllBtn.addEventListener('click', () => {
-        runAllBtn.disabled = true;
-        busyInc();
-        (async () => {
-            try {
-                for (const run of runners) {
-                    await run();
-                }
-            } finally {
-                busyDec();
-                runAllBtn.disabled = false;
-            }
-        })();
-    });
-
-    // Limpiar: oculta y vacía todos los paneles de resultados y reinicia el contador.
-    clearBtn.addEventListener('click', () => {
+    // Limpia: oculta y vacía todos los paneles de resultados y reinicia el contador.
+    const clearView = () => {
         for (const slot of slots) {
             slot.details.hidden = true;
             slot.details.open = false;
@@ -350,7 +491,35 @@ function renderPluginView(p) {
         }
         p._runTotals = {};
         updatePluginBadge(p);
+    };
+    p._clear = clearView;
+
+    // ejecuta en secuencia todos los runners del plugin (fichero a fichero en plugins, por
+    // carpeta en el core). Limpia primero (juego de tests nuevo). Se expone en el objeto
+    // plugin para la ejecución en lote.
+    const runAll = async () => {
+        clearView();
+        for (const run of runners) {
+            await run();
+        }
+    };
+    p._runAll = runAll;
+    runAllBtn.addEventListener('click', () => {
+        runAllBtn.disabled = true;
+        busyInc();
+        (async () => {
+            try {
+                await runAll();
+            } finally {
+                busyDec();
+                runAllBtn.disabled = false;
+            }
+        })();
     });
+
+    clearBtn.addEventListener('click', clearView);
+
+    return view;
 }
 
 // --- paginación de tarjetas ---
@@ -636,6 +805,46 @@ function renderCase(c) {
 }
 
 renderSidebar();
+setupSidebarResize();
+
+// Hace redimensionable la columna izquierda arrastrando su borde derecho. El ancho se guarda
+// en localStorage y se restaura entre sesiones.
+function setupSidebarResize() {
+    const app = document.getElementById('app');
+    if (!app) return;
+    const KEY = 'testrunner.sidebarW';
+    const MIN = 200, MAX = 800;
+
+    const saved = parseInt(localStorage.getItem(KEY) || '', 10);
+    if (saved >= MIN && saved <= MAX) app.style.setProperty('--sidebar-w', saved + 'px');
+
+    const resizer = el('div', { class: 'resizer', title: 'Arrastra para redimensionar la columna' });
+    app.appendChild(resizer);
+
+    let dragging = false;
+    const onMove = (e) => {
+        if (!dragging) return;
+        const rect = app.getBoundingClientRect();
+        const w = Math.max(MIN, Math.min(MAX, e.clientX - rect.left));
+        app.style.setProperty('--sidebar-w', w + 'px');
+    };
+    const onUp = () => {
+        if (!dragging) return;
+        dragging = false;
+        document.body.classList.remove('resizing');
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        const w = parseInt(app.style.getPropertyValue('--sidebar-w'), 10);
+        if (w) localStorage.setItem(KEY, String(w));
+    };
+    resizer.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        dragging = true;
+        document.body.classList.add('resizing');
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+    });
+}
 
 // botón "volver arriba" del pie
 const toTop = document.getElementById('toTop');
