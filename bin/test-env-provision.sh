@@ -306,7 +306,16 @@ PHP
 log_step "Generando Test/install-plugins.php (sync)..."
 cat > "$TESTENV_DIR/Test/install-plugins.php" <<'PHP'
 <?php
-// Sincroniza los plugins activos con la lista EXACTA de Test/Plugins/install-plugins.txt.
+// Sincroniza los plugins activos con el conjunto Y EL ORDEN exactos de
+// Test/Plugins/install-plugins.txt. El orden importa tanto como el conjunto: en Dinamic
+// gana el plugin con `order` más alto (PluginsDeploy::run() hace array_reverse y se queda
+// con el primer fichero que encuentra), y Plugins::enable() solo asigna
+// `order = maxOrder() + 1` cuando activa de verdad -- si el plugin ya estaba activo de una
+// suite anterior, enable() es un no-op y conserva su `order` viejo, invirtiendo la
+// precedencia que declara esta lista. Por eso, cuando el conjunto activo o su orden relativo
+// no coincide con la lista, desactivamos TODO y reactivamos en el orden pedido (así se
+// reasignan los `order`); si ya coincide, no tocamos nada (reactivar dispara
+// Plugins::deploy(), que reconstruye Dinamic/, rutas y esquema, y es caro).
 // Generado por bin/test-env-provision.sh (test-env está en .gitignore).
 
 use FacturaScripts\Core\Base\DataBase;
@@ -329,7 +338,7 @@ Cache::clear();
 Kernel::init();
 Plugins::init();
 
-// lista objetivo: conjunto exacto de plugins activos para este juego de tests
+// lista objetivo: conjunto y orden exactos de plugins activos para este juego de tests
 $target = [];
 $listPath = __DIR__ . '/Plugins/install-plugins.txt';
 if (file_exists($listPath)) {
@@ -341,22 +350,63 @@ if (file_exists($listPath)) {
     }
 }
 
-// 1) desactivar todo lo activo que no esté en la lista
-foreach (Plugins::enabled() as $name) {
-    if (!in_array($name, $target, true)) {
-        Plugins::disable($name);
+// Orden de activación: preservamos el orden de $target, pero si un plugin requiere a otro
+// que en la lista aparece DESPUÉS, la dependencia manda (Plugins::enable() no activa un
+// plugin sin sus dependencias ya activas: ver Plugin::dependenciesOk()). Es un orden
+// topológico ESTABLE: para cada plugin de $target, en su orden, colocamos antes
+// (recursivamente) las dependencias que también estén en la lista y aún no se hayan
+// colocado. install-plugins.txt ya debería declarar las dependencias antes que quien las
+// necesita (igual que exige bin/plugin-topo-order.php al generar la lista completa del
+// aprovisionamiento); esto es solo la red de seguridad para ese caso, y si $target ya es
+// topológicamente válida, $activationOrder sale idéntica a $target.
+$activationOrder = [];
+$placed = [];
+$placeWithDeps = function (string $name) use (&$placeWithDeps, &$activationOrder, &$placed, $target): void {
+    if (isset($placed[$name])) {
+        return;
     }
+    $placed[$name] = true;
+    $plugin = Plugins::get($name);
+    if ($plugin) {
+        foreach ($plugin->require as $dep) {
+            if (in_array($dep, $target, true)) {
+                $placeWithDeps($dep);
+            }
+        }
+    }
+    $activationOrder[] = $name;
+};
+foreach ($target as $name) {
+    $placeWithDeps($name);
 }
 
-// 2) activar, en el orden indicado (dependencias), lo que falte
-foreach ($target as $plugin) {
+// si el conjunto activo actual y su orden relativo YA coinciden, no tocamos nada.
+$current = Plugins::enabled();
+if ($current === $activationOrder) {
+    echo 'Entorno ya sincronizado. Activos: ' . implode(',', $current) . PHP_EOL;
+    $db->close();
+    exit(0);
+}
+
+// 1) desactivamos TODO lo que esté activo. No basta con desactivar lo que sobra: el
+//    `order` de un plugin solo cambia al pasar por un enable() nuevo, así que para corregir
+//    el orden relativo hay que desactivar también los que se van a mantener y reactivarlos
+//    después en su sitio.
+foreach ($current as $name) {
+    Plugins::disable($name);
+}
+
+// 2) activamos en el orden ya resuelto (lista + dependencias).
+foreach ($activationOrder as $plugin) {
     if (null === Plugins::get($plugin)) {
         echo '-> Plugin ' . $plugin . ' no localizado.' . PHP_EOL;
         $db->close();
         exit(2);
     }
-    if (!Plugins::isEnabled($plugin)) {
-        Plugins::enable($plugin);
+    if (!Plugins::enable($plugin)) {
+        echo '-> No se pudo activar ' . $plugin . ': revisa sus dependencias en install-plugins.txt.' . PHP_EOL;
+        $db->close();
+        exit(3);
     }
 }
 
