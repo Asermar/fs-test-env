@@ -98,6 +98,40 @@ además de la instalada, las **5 versiones (tags) más recientes** del repo de o
 
 - Web: el host configurado en `TESTENV_HOST` (runner navegable).
 - CLI: `cd <TESTENV_DIR> && vendor/bin/phpunit Plugins/<Plugin>/Test`.
+- **API HTTP** (`web/public/index.php`, `TestRunner::run()`): pensada para lanzar un escenario de
+  test sin navegador (scripts, agentes). Replica el mismo flujo que la web y que `fsmaker
+  run-tests` — copia `Test/<sub>` a `Test/Plugins/`, sincroniza los plugins activos vía
+  `install-plugins.php` y lanza PHPUnit con `--log-junit` — serializado con `flock` (comparte
+  BD y carpeta con la web y con cualquier otra ejecución concurrente).
+
+  ```bash
+  curl -s -X POST "http://<TESTENV_HOST>/?action=run" \
+      --data-urlencode "plugin=BusCanarias" \
+      --data-urlencode "sub=main"
+  ```
+
+  Parámetros (todos por POST, `x-www-form-urlencoded`):
+  - `plugin` — nombre del plugin (carpeta bajo `Plugins/`).
+  - `sub` — escenario, o sea la subcarpeta de su `Test/` (`main`, `ships`…). Un solo escenario
+    por llamada; para varios, una llamada por escenario.
+  - `file` (opcional) — nombre de un `*Test.php` concreto dentro de `sub`, para ejecutar solo
+    ese fichero (el resto del escenario se copia y activa igual, pero no se ejecuta).
+  - `core=1` + `path=Test/Core/...` — variante para un test del **core** en vez de un plugin
+    (`TestRunner::runCore()`); no copia ni activa nada.
+
+  Devuelve JSON. En éxito (`"ok": true`):
+  ```json
+  {
+    "ok": true, "plugin": "BusCanarias", "sub": "main", "file": "",
+    "config": "phpunit-webrunner.xml", "exitCode": 0, "stdout": "...",
+    "installLog": "...",
+    "totals": {"tests": 11, "pass": 11, "fail": 0, "error": 0, "skip": 0,
+               "warning": 0, "assertions": 113, "time": 1.68}
+  }
+  ```
+  `exitCode` es el de PHPUnit (0 = todo verde); `totals` viene de parsear el `--log-junit`
+  (`JUnitParser`), así que es fiable aunque `stdout` se trunque. En fallo de parámetros/entorno
+  (`"ok": false`) trae `error` con el motivo, sin `totals`.
 
 ## Versión del entorno
 
