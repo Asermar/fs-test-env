@@ -133,6 +133,38 @@ además de la instalada, las **5 versiones (tags) más recientes** del repo de o
   (`JUnitParser`), así que es fiable aunque `stdout` se trunque. En fallo de parámetros/entorno
   (`"ok": false`) trae `error` con el motivo, sin `totals`.
 
+## Testing de mutación
+
+La cobertura dice qué líneas se ejecutaron; **no** dice si los tests fallarían con el código mal.
+Para eso está `bin/test-env-mutacion.sh`: introduce fallos de verdad —invierte una condición, cambia
+un operador, quita una llamada— y cuenta cuántos caza la suite. Un fallo que ningún test detecta es
+un **mutante escapado**, y cada escapado es una comprobación que creíamos tener y no tenemos.
+
+```bash
+bin/test-env-mutacion.sh OSBCae                  # todo el plugin, escenario main
+bin/test-env-mutacion.sh OSBCae main Lib         # sólo Lib/
+bin/test-env-mutacion.sh BusCanarias rutas Lib/Rutas
+MSI_MINIMO=80 bin/test-env-mutacion.sh OSBCae main Lib   # y falla si baja de ahí
+```
+
+Requiere `composer install` en este repo una vez: **Infection vive aquí y no en el core del
+test-env**, porque ese core es un clon al que la provisión hace `git pull` y `composer install`, así
+que una dependencia añadida allí se perdería o daría conflicto.
+
+Tres cosas que el script hace por ti y que son justo donde se falla a mano:
+
+- **Sincroniza la activación del escenario antes de medir.** Sin eso el plugin no está activo, su
+  código no se ejecuta y la cobertura sale a cero: Infection concluiría que no hay nada que mutar.
+- **Sustituye temporalmente `phpunit.xml`** por uno acotado a `Test/Plugins`, con respaldo y
+  restauración garantizada. Infection sólo sabe usar ese nombre, y el del core apunta a `Test/Core`,
+  que en este entorno no pasa; sin esto se niega a arrancar.
+- **Comprueba que el código fuente quedó intacto** al terminar. Los plugins entran en el core por
+  symlink, así que la comprobación no es paranoia: es la diferencia entre mutar y estropear.
+
+Va a **un solo hilo** a propósito: los tests comparten una base de datos y con varios hilos los
+mutantes mueren por colisión de clave única en vez de por el fallo introducido, lo que infla la
+métrica en la dirección cómoda.
+
 ## Versión del entorno
 
 El tooling se versiona con el fichero **`VERSION`** (semver) en la raíz del repo, replicado en

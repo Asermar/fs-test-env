@@ -1,0 +1,18 @@
+{
+    "name": "asermar/fs-test-env",
+    "description": "Herramientas del entorno de test de FacturaScripts. Aquí sólo viven las que NO pueden ir dentro del core: el core del test-env es un clon al que la provisión hace git pull y composer install, así que cualquier dependencia añadida allí se perdería o daría conflicto.",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.1"
+    },
+    "require-dev": {
+        "infection/infection": "^0.31"
+    },
+    "config": {
+        "allow-plugins": {
+            "infection/extension-installer": true
+        },
+        "sort-packages": true
+    }
+}
