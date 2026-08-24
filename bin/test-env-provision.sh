@@ -3,7 +3,7 @@
 # Provisión NO INTERACTIVA del entorno de pruebas de FacturaScripts.
 #
 # Pensado para ejecutarse tanto en el host como dentro del contenedor podman
-# 'test.mesafs' (al arrancar). A diferencia de bin/setup-test-env.sh:
+# 'mesa-fs-test' (al arrancar). A diferencia de bin/setup-test-env.sh:
 #   - No hace preguntas (todo por variables de entorno con defaults).
 #   - No usa sudo ni instala extensiones PHP (ya están en la imagen / el host).
 #   - Clona el core por HTTPS (repo público) para no depender de claves SSH.
