@@ -102,13 +102,15 @@ else
     fi
 
     log_step "Eliminando la BD de pruebas ($TEST_DB)..."
-    php -r '
-    $m = new mysqli($argv[1], $argv[3], $argv[4], "", (int)$argv[2]);
+    # La contraseña por ENTORNO y no en argv: `/proc/<pid>/cmdline` lo lee cualquier usuario de la
+    # máquina, `/proc/<pid>/environ` sólo su dueño. Mismo motivo que en el provisionador.
+    FS_TEST_DB_PASS="$DB_PASS" php -r '
+    $m = new mysqli($argv[1], $argv[3], (string) getenv("FS_TEST_DB_PASS"), "", (int)$argv[2]);
     if ($m->connect_errno) { fwrite(STDERR, "conexion: " . $m->connect_error . "\n"); exit(1); }
     $db = $m->real_escape_string($argv[5]);
     $m->query("DROP DATABASE IF EXISTS `$db`");
     echo "   BD eliminada: " . $argv[5] . "\n";
-    ' "$DB_HOST" "$DB_PORT" "$DB_USER" "$DB_PASS" "$TEST_DB"
+    ' "$DB_HOST" "$DB_PORT" "$DB_USER" "" "$TEST_DB"
 fi
 
 echo

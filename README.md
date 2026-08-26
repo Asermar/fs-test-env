@@ -1,5 +1,11 @@
 # fs-test-env
 
+<p align="center">
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-2.2.1-2E7D6E?style=for-the-badge"></a>
+  <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
+  <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
+</p>
+
 Tooling reutilizable para montar un **entorno de pruebas de FacturaScripts** (PHPUnit) y
 ejecutar los tests de los plugins, con un **runner web** navegable — sin tocar la instalación ni
 la base de datos de trabajo del proyecto.
@@ -237,3 +243,28 @@ class CsvImportPresentTest extends TestCase
     }
 }
 ```
+
+## Changelog
+
+Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
+changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 2.2.1 — El arnés deja de callarse, y la contraseña deja de salir
+
+- **2.2.1** — **El warm-up del esquema fallaba en silencio.** Iba envuelto en `2>/dev/null` y sin
+  comprobar el resultado, así que una provisión podía dejar la base a medias y seguir como si nada:
+  ni funcionaba ni lo decía. Ahora **habla siempre** y sólo es **fatal en la ronda final**
+  (`--exigir`) — porque la primera ronda *puede* fallar por diseño: hay plugins cuyo post-enable
+  necesita un esquema que aún no existe, y de eso van justamente las dos rondas.
+- **2.2.1** — **Las activaciones de plugins dejan pasar el `stderr`.** Tres invocaciones de
+  `install-plugins.php` iban a `>/dev/null 2>&1`; se conserva el `|| true`, que es de su diseño,
+  pero el error se ve. Una de las tres es la de la pizarra limpia: si falla, deja el entorno con
+  plugins activos que nadie pidió.
+- **2.2.1** — **La contraseña de la base ya no se puede leer desde fuera.** Iba como *argumento*
+  de `php -r` en la provisión y en el teardown, y un argumento es visible en la lista de procesos
+  para cualquier usuario de la máquina (`/proc/<pid>/cmdline` es legible por todos). Ahora va por
+  variable de entorno, que sólo lee su dueño. Y el `echo` que la volcaba en la cabecera de cada
+  ejecución de tests —**que viene del core oficial de FacturaScripts**, no de aquí— se retira en el
+  parche del bootstrap que este arnés ya aplicaba, de forma idempotente: el core lo restaura en
+  cada actualización, así que comprobar y quitar tiene que ocurrir en cada provisión.
+
