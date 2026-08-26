@@ -139,13 +139,18 @@ fi
 
 # --- 3) crear la BD de pruebas si no existe ---
 log_step "Creando BD de pruebas (si falta)..."
-php -r '
-$m = new mysqli($argv[1], $argv[3], $argv[4], "", (int)$argv[2]);
+# LA CONTRASEÑA NO VA EN argv. Un argumento de proceso se lee en `/proc/<pid>/cmdline`, que es
+# LEGIBLE POR CUALQUIER USUARIO de la máquina: no hace falta que nadie pegue un log, basta un `ps`
+# en el momento justo. El entorno no: `/proc/<pid>/environ` es 0400 del propio usuario. Lo estricto
+# sería pasarla por stdin, y si algún día esto crece a algo con más de un usuario real, ése es el
+# siguiente paso. Los otros argumentos (host, puerto, usuario, base) no son secretos y se quedan.
+FS_TEST_DB_PASS="$DB_PASS" php -r '
+$m = new mysqli($argv[1], $argv[3], (string) getenv("FS_TEST_DB_PASS"), "", (int)$argv[2]);
 if ($m->connect_errno) { fwrite(STDERR, "conexion: ".$m->connect_error."\n"); exit(1); }
 $db = $m->real_escape_string($argv[5]);
 $m->query("CREATE DATABASE IF NOT EXISTS `$db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci");
 echo "   BD lista: $argv[5]\n";
-' "$DB_HOST" "$DB_PORT" "$DB_USER" "$DB_PASS" "$TEST_DB"
+' "$DB_HOST" "$DB_PORT" "$DB_USER" "" "$TEST_DB"
 
 # --- 4) config.php del core apuntando a la BD de pruebas ---
 log_step "Escribiendo config.php de pruebas..."
@@ -236,8 +241,30 @@ warmup_schema() {
     return 0
 }
 
-# --- 7) parchear el bootstrap de tests (cargar extensiones de plugins) ---
+# --- 7) parchear el bootstrap de tests (extensiones de plugins, y quitar la fuga de la clave) ---
 BOOTSTRAP="$TESTENV_DIR/Test/bootstrap.php"
+
+# LA CONTRASEÑA DE LA BD SE QUITA DEL BOOTSTRAP, Y NO ES UN BUG NUESTRO. La línea
+# `echo "\n" . 'DB Pass: ' . FS_DB_PASS;` viene del CORE OFICIAL de FacturaScripts
+# (`Test/bootstrap.php`, ~línea 43): imprime la contraseña en la cabecera de CADA ejecución de
+# PHPUnit, así que acaba en cualquier log, captura o pegado de una salida de tests. Aquí se retira
+# porque este fichero ya se parchea de todas formas, y sale gratis.
+#
+# Queda comentado a propósito, con dos motivos: que nadie lo lea como un defecto de este arnés, y
+# que nadie lo «restaure» al actualizar el core. Y va FUERA del `if` de abajo: ese `if` sólo actúa
+# cuando falta `Plugins::init()`, mientras que el `echo` vuelve en CADA actualización del core (el
+# paso 2 hace `git checkout --` de este fichero antes de parchearlo), así que hay que quitarlo
+# siempre. Es idempotente: si ya no está, no hace nada.
+if [ -f "$BOOTSTRAP" ] && grep -q "DB Pass" "$BOOTSTRAP"; then
+    log_step "Quitando del bootstrap el volcado de la contraseña (viene del core)..."
+    tmp_bs="$(mktemp)"
+    grep -v "DB Pass" "$BOOTSTRAP" > "$tmp_bs" && mv "$tmp_bs" "$BOOTSTRAP"
+    if grep -q "DB Pass" "$BOOTSTRAP"; then
+        echo "ERROR: no se pudo quitar la contraseña del bootstrap; los tests la imprimirán." >&2
+        exit 1
+    fi
+fi
+
 if [ -f "$BOOTSTRAP" ] && ! grep -q "Plugins::init()" "$BOOTSTRAP"; then
     log_step "Parcheando Test/bootstrap.php (Plugins::init)..."
     cat >> "$BOOTSTRAP" <<'PHP'
