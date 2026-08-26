@@ -196,9 +196,44 @@ echo "$ENABLE_LIST" > "$TESTENV_DIR/Test/Plugins/install-plugins.txt"
 # La activación la hace Test/install-plugins.php (sincroniza al conjunto exacto de
 # Test/Plugins/install-plugins.txt). Ver la orquestación al final del script.
 
+# EL WARM-UP HABLA, Y SE COMPRUEBA SI FALLÓ. Antes iba con `2>/dev/null` y sin mirar el resultado:
+# cuando PHP moría con un fatal no se imprimía NADA y, con `set -e`, el script abortaba en silencio.
+# «Ni funciona ni lo dice» es la peor combinación, y costó horas de diagnóstico — el fallo real era un
+# `Table/*.xml` que declaraba `serial` sin PRIMARY KEY y no se podía crear de cero, invisible detrás
+# del silenciador.
+#
+# OJO A LA DIFERENCIA con los `2>/dev/null` de más arriba (los `git checkout --` de los ficheros
+# parcheados): aquéllos son DELIBERADOS y correctos, porque restauran ficheros que pueden no existir y
+# llevan su `|| true`. El patrón malo es otro: silenciar algo que SÍ puede fallar de verdad y además
+# no mirar si falló. No los unifiques.
+# warmup_schema [--exigir]: HABLA SIEMPRE, pero sólo es FATAL con `--exigir`.
+#
+# Los dos matices importan y salen de un error propio. Que hable siempre: antes iba con
+# `2>/dev/null` y sin mirar el resultado, así que un fatal de PHP no imprimía NADA y con `set -e` la
+# provisión abortaba en silencio — «ni funciona ni lo dice», horas de diagnóstico por un
+# `Table/*.xml` con `serial` sin PRIMARY KEY que sólo asoma en una BD nueva.
+#
+# Y que sólo sea fatal al final: la ronda 1 PUEDE fallar por diseño —hay plugins que en su
+# post-enable necesitan un esquema que aún no existe, y de eso van justamente las dos rondas—, así
+# que hacerla fatal aborta una provisión que iba bien. Medido: al hacerla fatal, una provisión desde
+# una BD vacía moría en la ronda 1 y ejecutar el warm-up a mano justo después daba OK=290 FAIL=0.
+# La que no puede fallar es la ÚLTIMA, y ésa es la que lleva `--exigir`.
 warmup_schema() {
+    local exigir=0
+    [ "${1:-}" = "--exigir" ] && exigir=1
     log_step "Construyendo esquema de la BD de pruebas (warm-up)..."
-    ( cd "$TESTENV_DIR" && php warmup-schema.php 2>/dev/null )
+    if ( cd "$TESTENV_DIR" && php warmup-schema.php ); then
+        return 0
+    fi
+    if [ "$exigir" -eq 1 ]; then
+        echo "ERROR: el warm-up del esquema falló en la ronda final (su salida está arriba)." >&2
+        echo "  suele ser un Table/*.xml que no se puede crear de cero — p. ej. 'serial' sin" >&2
+        echo "  PRIMARY KEY, que da ERROR 1075 y sólo asoma en una BD nueva." >&2
+        return 1
+    fi
+    echo "AVISO: el warm-up falló en una ronda intermedia. Puede ser normal —hay plugins que" >&2
+    echo "  necesitan un esquema que aún no existe— pero su salida queda arriba por si no lo es." >&2
+    return 0
 }
 
 # --- 7) parchear el bootstrap de tests (cargar extensiones de plugins) ---
@@ -425,19 +460,28 @@ log_step "Construyendo esquema (activar todos + warm-up, 2 rondas)..."
 echo "$ENABLE_LIST" > "$TESTENV_DIR/Test/Plugins/install-plugins.txt"
 # Estas activaciones son el tramo más largo y antes iba en silencio absoluto
 # (>/dev/null): marcamos cada ronda para que se vea el avance en OkoGit.
+#
+# El `|| true` SE QUEDA y es de su diseño: en la 1ª ronda algunos plugins no pueden activarse porque
+# su tabla aún no existe, y eso es esperado. Lo que se quita es el `2>&1`: la salida normal sigue
+# callada —es larguísima— pero un error de verdad ya no se descarta. Silenciar el avance es una
+# decisión; silenciar los errores es perder el diagnóstico.
 log_step "Esquema · ronda 1/2: activando plugins (esto tarda)..."
-( cd "$TESTENV_DIR" && php Test/install-plugins.php >/dev/null 2>&1 ) || true
+( cd "$TESTENV_DIR" && php Test/install-plugins.php >/dev/null ) || true
 warmup_schema
 log_step "Esquema · ronda 2/2: activando plugins..."
-( cd "$TESTENV_DIR" && php Test/install-plugins.php >/dev/null 2>&1 ) || true
-warmup_schema
+( cd "$TESTENV_DIR" && php Test/install-plugins.php >/dev/null ) || true
+warmup_schema --exigir
 
 # 2) Pizarra limpia: sincronizamos a lista VACÍA => se desactivan todos los plugins.
 #    Las tablas creadas en el warm-up permanecen; cada juego de tests activará luego
 #    exactamente los plugins de su install-plugins.txt.
+# La pizarra limpia también deja pasar el stderr, y por el mismo motivo: si esto falla, el entorno
+# queda con plugins activos y el siguiente juego de tests arranca sobre un estado que no es el que
+# declara su `install-plugins.txt`. El `|| true` se conserva para no abortar por esto una provisión
+# que por lo demás salió bien, pero al menos se ve.
 log_step "Dejando todos los plugins desactivados (pizarra limpia)..."
 : > "$TESTENV_DIR/Test/Plugins/install-plugins.txt"
-( cd "$TESTENV_DIR" && php Test/install-plugins.php >/dev/null 2>&1 ) || true
+( cd "$TESTENV_DIR" && php Test/install-plugins.php >/dev/null ) || true
 
 echo
 printf '%s================================================================%s\n' "$C_OK" "$C_RESET"
