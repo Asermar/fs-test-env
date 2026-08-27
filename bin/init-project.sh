@@ -39,9 +39,42 @@ fi
 ENV_FILE="$FS_PROJECT_ROOT/.fs-test-env.env"
 OUT_DIR="$FS_PROJECT_ROOT/.fs-test-env"
 
-# valores previos (si ya existe) como defaults
+# --- el registro: de dónde sale cada valor ------------------------------------------------------
+# `.fs-test-env.env` deja de ser un fichero VERSIONADO en el repo del cliente y pasa a ser un fichero
+# GENERADO, como `src/config.php` en Mesa/FS. Es la norma de la casa: *cualquier fichero que cambie
+# por entorno y siga versionado tiene un defecto latente*.
+# shellcheck disable=SC1091
+. "$FS_TEST_DIR/bin/lib/registro.sh"
+
+FS_TEST_ID="${FS_TEST_ID:-$(registro_id_de "$FS_PROJECT_ROOT")}"
+NUEVA=0
+registro_existe "$REGISTRO_CONF" "$FS_TEST_ID" || NUEVA=1
+
+# valores previos (si ya existe el generado) como defaults
 # shellcheck disable=SC1090
 [ -f "$ENV_FILE" ] && . "$ENV_FILE"
+
+# (C) del REGISTRO, que manda sobre lo que hubiera en el generado: es la fuente de verdad
+reg() { registro_lee "$REGISTRO_CONF" "$FS_TEST_ID" "$1"; }
+if [ "$NUEVA" = "0" ]; then
+    CORE_REPO="$(reg core_repo)";           CORE_BRANCH="$(reg core_branch)"
+    ENABLE_LIST="$(reg enable_list)";       FS_LANG="$(reg fs_lang)"
+    FS_TIMEZONE="$(reg fs_timezone)";       TEST_WEB_TITLE="$(reg test_web_title)"
+    TESTENV_IMAGE="$(reg testenv_image)";   TESTENV_NETWORK="$(reg testenv_network)"
+    CONTAINER_ENGINE="$(reg container_engine)"
+fi
+
+# (A) de la MÁQUINA: del fichero de máquina, que es el único que las sabe
+maq() { registro_lee "$REGISTRO_MAQUINA" "$FS_TEST_ID" "$1"; }
+TESTENV_REPO_PATH="${TESTENV_REPO_PATH:-$(maq repo_path)}"
+TESTENV_DIR="${TESTENV_DIR:-$(maq testenv_dir)}"
+TESTENV_RUN_USER="${TESTENV_RUN_USER:-$(maq run_user)}"
+FS_CORE_DIR="${FS_CORE_DIR:-$(maq core_dir)}"
+
+# (B) DERIVADO de lo que ya está versionado — no se pregunta ni se guarda
+FS_CORE_DIR="${FS_CORE_DIR:-$( [ -d "$FS_PROJECT_ROOT/src/Core" ] && echo src || echo . )}"
+eval "$(registro_compose "$FS_PROJECT_ROOT" | sed 's/^\([A-Z_]*\)=\(.*\)$/\1="\2"/')"
+TEST_DB="$(registro_db_test "$FS_PROJECT_ROOT" "$FS_CORE_DIR")"
 
 INTERACTIVE=1
 [ -t 0 ] || INTERACTIVE=0
@@ -58,26 +91,54 @@ ask() {  # ask VAR "pregunta" "default"
     fi
 }
 
-echo ">> Configuración del entorno de test para: $FS_PROJECT_ROOT"
-ask FS_CORE_DIR            "Carpeta del core (src | .)" "src"
-ask TESTENV_REPO_PATH      "Ruta absoluta del proyecto (host=contenedor)" "$FS_PROJECT_ROOT"
-ask FS_TEST_DIR            "Ruta absoluta del arnés (host=contenedor)" "$FS_TEST_DIR"
-ask TEST_DB                "Nombre de la BD de pruebas" "fs_test"
-ask CORE_REPO              "Repositorio del core" "https://github.com/NeoRazorX/facturascripts.git"
-ask CORE_BRANCH            "Rama o tag del core (vacío = versión instalada, v<Kernel::version()>)" ""
-ask FS_LANG                "Idioma (FS_LANG)" "es_ES"
-ask FS_TIMEZONE            "Zona horaria (FS_TIMEZONE)" "UTC"
-ask TEST_WEB_TITLE         "Título del runner web" "Tests de plugins"
-ask TEST_WEB_URL           "URL del runner web (informativa)" ""
-ask TESTENV_SERVICE        "Nombre del servicio compose" "fs-testenv"
-ask TESTENV_CONTAINER      "container_name" "fs-testenv"
-ask TESTENV_HOST           "Host (ServerName / traefik)" "test.localhost"
-ask TESTENV_IMAGE          "Imagen del contenedor" "localhost/php_devel:8.4"
-ask TESTENV_NETWORK        "Red compose" "default"
-ask TESTENV_TRAEFIK_ROUTER "Nombre del router traefik" "fs-testenv"
-ask TESTENV_RUN_USER       "Usuario apache dentro del contenedor" "www-data"
-ask TESTENV_DB_SERVICE     "Servicio de BD del compose (depends_on)" "db"
-ask CONTAINER_ENGINE       "Motor de contenedores (podman | docker)" "podman"
+echo ">> Entorno de test para: $FS_PROJECT_ROOT"
+echo "   instalación: [$FS_TEST_ID]$( [ "$NUEVA" = 1 ] && echo '  (NUEVA: se dará de alta en el registro)' || echo '  (ya registrada: se recupera su bloque)')"
+
+# LA RAÍZ NO SE PREGUNTA NI SE HEREDA: es donde estamos, y punto.
+#
+# Se forzaba a preguntarla con el valor del `.fs-test-env.env` existente como defecto, y ahí había un
+# fallo real que destapó la prueba de la copia: **una copia hereda el fichero generado del original**,
+# así que `TESTENV_REPO_PATH` entraba con la ruta del ORIGINAL y la copia se registraba apuntando a
+# él. Es exactamente el defecto que este registro viene a quitar, colado por la puerta de atrás.
+TESTENV_REPO_PATH="$FS_PROJECT_ROOT"
+# Y lo mismo con el directorio del core de pruebas: si lo heredado NO cuelga de este proyecto, es de
+# otro y no vale. Se recalcula en vez de arrastrarlo.
+case "${TESTENV_DIR:-}" in
+    "$FS_PROJECT_ROOT"/*) ;;
+    *) TESTENV_DIR="$FS_PROJECT_ROOT/test-env/facturascripts" ;;
+esac
+
+# (A) LO QUE SÍ SE PREGUNTA: lo de esta máquina que no se puede inferir de nada.
+ask FS_TEST_DIR       "Ruta absoluta del arnés (host=contenedor)" "$FS_TEST_DIR"
+ask TESTENV_DIR       "Directorio del core de pruebas" "$TESTENV_DIR"
+ask TESTENV_RUN_USER  "Usuario que corre apache dentro del contenedor" "${TESTENV_RUN_USER:-www-data}"
+
+# (C) solo si la instalación es NUEVA. Si ya está registrada, cambiarla aquí crearía una segunda
+# verdad: se edita `config/instalaciones.conf`, que es donde vive.
+if [ "$NUEVA" = "1" ]; then
+    echo "   -- configuración del producto (se guardará en el registro) --"
+    ask CORE_REPO        "Repositorio del core" "${CORE_REPO:-https://github.com/NeoRazorX/facturascripts.git}"
+    ask CORE_BRANCH      "Rama o tag del core (vacío = versión instalada)" "${CORE_BRANCH:-}"
+    ask ENABLE_LIST      "Plugins del warm-up (vacío = todos los enlazados)" "${ENABLE_LIST:-}"
+    ask FS_LANG          "Idioma (FS_LANG)" "${FS_LANG:-es_ES}"
+    ask FS_TIMEZONE      "Zona horaria (FS_TIMEZONE)" "${FS_TIMEZONE:-UTC}"
+    ask TEST_WEB_TITLE   "Título del runner web" "${TEST_WEB_TITLE:-Tests de plugins}"
+    ask TESTENV_IMAGE    "Imagen del contenedor" "${TESTENV_IMAGE:-localhost/php_devel:8.4}"
+    ask TESTENV_NETWORK  "Red compose" "${TESTENV_NETWORK:-default}"
+    ask CONTAINER_ENGINE "Motor de contenedores (podman | docker)" "${CONTAINER_ENGINE:-podman}"
+fi
+
+# (B) lo derivado se ENSEÑA, no se pregunta: quien lo vea puede desmentirlo.
+echo "   -- derivado, ni se pregunta ni se guarda --"
+printf '      %-24s %s\n' TEST_DB "$TEST_DB" TESTENV_CONTAINER "${TESTENV_CONTAINER:-}" \
+       TESTENV_HOST "${TESTENV_HOST:-}" TEST_WEB_URL "${TEST_WEB_URL:-}" \
+       TESTENV_SERVICE "${TESTENV_SERVICE:-}" TESTENV_TRAEFIK_ROUTER "${TESTENV_TRAEFIK_ROUTER:-}" \
+       TESTENV_DB_SERVICE "${TESTENV_DB_SERVICE:-}" FS_CORE_DIR "$FS_CORE_DIR"
+
+# LA GUARDA, ANTES DE ESCRIBIR NADA. Dos comprobaciones y hacen falta las dos: que no sea la base de
+# TRABAJO (la que ya existía) y que no sea la de OTRA instalación registrada — el caso del worktree,
+# que la primera no ve porque son bases distintas.
+registro_guarda_db "$FS_PROJECT_ROOT" "$FS_TEST_ID" "$TEST_DB" "$FS_CORE_DIR" || exit 1
 
 case "$CONTAINER_ENGINE" in
     podman|docker) ;;
@@ -115,7 +176,48 @@ TESTENV_DB_SERVICE="$TESTENV_DB_SERVICE"
 CONTAINER_ENGINE="$CONTAINER_ENGINE"
 EOF
 umask 022
-echo "   escrito $ENV_FILE"
+echo "   escrito $ENV_FILE  (GENERADO: no se versiona)"
+
+# --- (A) la máquina: se guarda SIEMPRE, para que la próxima vez no haya que preguntar ------------
+registro_maquina_guarda "$FS_TEST_ID" \
+    "repo_path=$TESTENV_REPO_PATH" "core_dir=$FS_CORE_DIR" \
+    "testenv_dir=$TESTENV_DIR" "run_user=$TESTENV_RUN_USER"
+echo "   registrado [$FS_TEST_ID] en $REGISTRO_MAQUINA  (de esta máquina, no se versiona)"
+
+# --- que el generado DEJE DE VERSIONARSE, y por construcción -------------------------------------
+# Era un paso manual al final de la ayuda («añade esto a tu .gitignore»), y un paso manual es el
+# único que ningún script verifica. Mientras el fichero siga versionado en el repo del cliente,
+# sigue en pie el defecto que este registro viene a quitar: rutas absolutas de una máquina dentro
+# del repo, y una copia que nace sucia porque hay que reescribirlo.
+GITIGNORE="$FS_PROJECT_ROOT/.gitignore"
+for patron in '/.fs-test-env.env' '/.fs-test-env/'; do
+    if [ -f "$GITIGNORE" ] && grep -qxF "$patron" "$GITIGNORE"; then continue; fi
+    printf '%s\n' "$patron" >> "$GITIGNORE"
+    echo "   .gitignore += $patron"
+done
+# Y decirlo si además sigue RASTREADO, porque ignorar no desversiona: `git rm --cached` es una
+# decisión de quien lleva ese repo, no de este script.
+if git -C "$FS_PROJECT_ROOT" ls-files --error-unmatch .fs-test-env.env >/dev/null 2>&1; then
+    echo "   AVISO: .fs-test-env.env sigue RASTREADO por git en este repo." >&2
+    echo "          Ignorarlo no lo desversiona. Para cerrarlo del todo:" >&2
+    echo "            git -C $FS_PROJECT_ROOT rm --cached .fs-test-env.env" >&2
+    echo "          Hasta entonces, este fichero generado sigue viajando en los commits." >&2
+fi
+
+# --- (C) el registro del producto: solo si la instalación era NUEVA ------------------------------
+# Que el alta sea parte del flujo y no un paso manual que alguien recuerde: un paso manual es el
+# único que ningún script verifica, y es el que se salta.
+if [ "$NUEVA" = "1" ]; then
+    {
+        printf '\n[%s]\n' "$FS_TEST_ID"
+        printf '%-16s = %s\n' descripcion "" core_repo "$CORE_REPO" core_branch "$CORE_BRANCH" \
+               enable_list "$ENABLE_LIST" fs_lang "$FS_LANG" fs_timezone "$FS_TIMEZONE" \
+               test_web_title "$TEST_WEB_TITLE" testenv_image "$TESTENV_IMAGE" \
+               testenv_network "$TESTENV_NETWORK" container_engine "$CONTAINER_ENGINE"
+    } >> "$REGISTRO_CONF"
+    echo "   ALTA de [$FS_TEST_ID] en $REGISTRO_CONF"
+    echo "   → ese fichero SÍ se versiona: commitéalo, y pon su 'descripcion'."
+fi
 
 # --- renderizar plantillas ---
 render() {  # render <plantilla>
@@ -159,9 +261,8 @@ cat <<EOF
 ================================================================
 Entorno de test configurado (motor: $CONTAINER_ENGINE).
 
-1) Añade a .gitignore del proyecto (si no quieres versionar la config local):
-     .fs-test-env
-     .fs-test-env.env
+1) La config local ya está ignorada (`.fs-test-env.env` y `.fs-test-env/`):
+     este script la añade al .gitignore, porque el fichero es GENERADO y no debe versionarse.
 
 2) Pega el servicio de $OUT_DIR/service.yaml en tu compose y levántalo:
      $UP_CMD
