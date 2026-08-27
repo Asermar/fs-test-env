@@ -139,6 +139,33 @@ además de la instalada, las **5 versiones (tags) más recientes** del repo de o
   (`JUnitParser`), así que es fiable aunque `stdout` se trunque. En fallo de parámetros/entorno
   (`"ok": false`) trae `error` con el motivo, sin `totals`.
 
+## La batería del arnés
+
+**`test/registro.sh`** — comprueba el **registro de instalaciones**: que una copia hereda la
+configuración de producto de su ancla, que una instalación nueva de verdad sigue preguntando, que una
+copia sin ancla falla en vez de registrarse, y que las guardas de la base de test siguen viendo a las
+copias. **22 comprobaciones, en torno a un segundo.**
+
+```bash
+test/registro.sh                 # desde la raíz del arnés
+test/registro.sh /ruta/al/arnes  # o diciéndole dónde está
+```
+
+Sale **0** si todo está en verde y **1** si algo falla, así que sirve de puerta en un script.
+
+**Es autocontenida**: se fabrica sus instalaciones de pega en un temporal y lo borra al salir, así que
+**no toca el registro versionado, ni el fichero de máquina, ni ningún proyecto real**. No necesita
+contenedores, ni base de datos, ni red — se puede correr en cualquier momento, también con el entorno
+apagado.
+
+> **Este repo no tiene CI, ni Makefile, ni hook que la ejecute**, y `okorelease` tampoco la exige. O
+> sea que la única forma de que se ejecute es que alguien la invoque: pásala **antes de cerrar una
+> rama** que toque `bin/init-project.sh` o `bin/lib/registro.sh`.
+
+> **Nació después del código que comprueba**, así que su valor es de **regresión**: atrapa lo que se
+> rompa de aquí en adelante, no acredita que lo ya escrito se hiciera con ella delante. Está dicho
+> también en su propia cabecera, que es donde lo leerá quien la abra.
+
 ## Testing de mutación
 
 La cobertura dice qué líneas se ejecutaron; **no** dice si los tests fallarían con el código mal.
