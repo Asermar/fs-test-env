@@ -47,15 +47,20 @@ OUT_DIR="$FS_PROJECT_ROOT/.fs-test-env"
 . "$FS_TEST_DIR/bin/lib/registro.sh"
 
 FS_TEST_ID="${FS_TEST_ID:-$(registro_id_de "$FS_PROJECT_ROOT")}"
+# De qué bloque sale la clase (C): el propio, o el de la instalación padre si esto es una copia.
+# Una copia sin entrada NO es una instalación nueva — es `mesa-fs` otra vez, en otro árbol.
+ORIGEN_C="$(registro_origen_de "$REGISTRO_CONF" "$FS_TEST_ID" || true)"
 NUEVA=0
-registro_existe "$REGISTRO_CONF" "$FS_TEST_ID" || NUEVA=1
+[ -n "$ORIGEN_C" ] || NUEVA=1
+HEREDADA=0
+[ -n "$ORIGEN_C" ] && [ "$ORIGEN_C" != "$FS_TEST_ID" ] && HEREDADA=1
 
 # valores previos (si ya existe el generado) como defaults
 # shellcheck disable=SC1090
 [ -f "$ENV_FILE" ] && . "$ENV_FILE"
 
 # (C) del REGISTRO, que manda sobre lo que hubiera en el generado: es la fuente de verdad
-reg() { registro_lee "$REGISTRO_CONF" "$FS_TEST_ID" "$1"; }
+reg() { registro_lee "$REGISTRO_CONF" "$ORIGEN_C" "$1"; }
 if [ "$NUEVA" = "0" ]; then
     CORE_REPO="$(reg core_repo)";           CORE_BRANCH="$(reg core_branch)"
     ENABLE_LIST="$(reg enable_list)";       FS_LANG="$(reg fs_lang)"
@@ -75,6 +80,11 @@ FS_CORE_DIR="${FS_CORE_DIR:-$(maq core_dir)}"
 FS_CORE_DIR="${FS_CORE_DIR:-$( [ -d "$FS_PROJECT_ROOT/src/Core" ] && echo src || echo . )}"
 eval "$(registro_compose "$FS_PROJECT_ROOT" | sed 's/^\([A-Z_]*\)=\(.*\)$/\1="\2"/')"
 TEST_DB="$(registro_db_test "$FS_PROJECT_ROOT" "$FS_CORE_DIR")"
+# Lo derivado puede NO estar: un compose sin router de traefik —local, o con docker— no da host ni
+# URL, y con `set -u` eso mataba al generador justo al escribir. Se dejan vacías, que es lo que
+# significan: «esta instalación no tiene eso». La guarda del TEST_DB es la que sí es obligatoria.
+: "${TESTENV_SERVICE:=}" "${TESTENV_CONTAINER:=}" "${TESTENV_HOST:=}" "${TEST_WEB_URL:=}"
+: "${TESTENV_TRAEFIK_ROUTER:=}" "${TESTENV_DB_SERVICE:=}"
 
 INTERACTIVE=1
 [ -t 0 ] || INTERACTIVE=0
@@ -92,7 +102,15 @@ ask() {  # ask VAR "pregunta" "default"
 }
 
 echo ">> Entorno de test para: $FS_PROJECT_ROOT"
-echo "   instalación: [$FS_TEST_ID]$( [ "$NUEVA" = 1 ] && echo '  (NUEVA: se dará de alta en el registro)' || echo '  (ya registrada: se recupera su bloque)')"
+# EL FALLBACK SE DICE EN VOZ ALTA. Uno silencioso que coja el padre equivocado es peor que
+# preguntar: la copia se configuraría con la del cliente de al lado y nadie lo vería.
+if [ "$HEREDADA" = "1" ]; then
+    echo "   instalación: [$FS_TEST_ID]  (copia: hereda la configuración de producto de [$ORIGEN_C])"
+elif [ "$NUEVA" = "1" ]; then
+    echo "   instalación: [$FS_TEST_ID]  (NUEVA: se dará de alta en el registro)"
+else
+    echo "   instalación: [$FS_TEST_ID]  (ya registrada: se recupera su bloque)"
+fi
 
 # LA RAÍZ NO SE PREGUNTA NI SE HEREDA: es donde estamos, y punto.
 #
@@ -207,6 +225,9 @@ fi
 # --- (C) el registro del producto: solo si la instalación era NUEVA ------------------------------
 # Que el alta sea parte del flujo y no un paso manual que alguien recuerde: un paso manual es el
 # único que ningún script verifica, y es el que se salta.
+# Una copia HEREDADA no se da de alta: su configuración es la del padre y una entrada por worktree
+# llenaría el registro versionado de copias efímeras. Su base de test sigue vigilada, porque la
+# guarda mira el fichero de MÁQUINA —donde sí queda registrada— y no éste.
 if [ "$NUEVA" = "1" ]; then
     {
         printf '\n[%s]\n' "$FS_TEST_ID"

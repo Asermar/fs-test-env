@@ -82,6 +82,41 @@ registro_ids() {  # todos los ids declarados en un fichero
 
 registro_existe() { [ -n "$(registro_lee "$1" "$2" descripcion)$(registro_lee "$1" "$2" core_repo)" ]; }
 
+# --- UNA COPIA HEREDA LA CONFIGURACIÓN DE PRODUCTO DE SU INSTALACIÓN PADRE ---------------------
+#
+# Desde que el entorno de test deja de vivir en el checkout principal, el consumidor normal de este
+# registro es una COPIA: `okoworktree` crea `<repo>-wt-<nombre>` y provisiona ahí. Sin herencia, esa
+# copia no tiene bloque, se toma por instalación nueva y el generador cae en el camino interactivo —
+# nueve preguntas— que es inservible desde un `okoworktree add`, que es no interactivo por diseño.
+#
+# HEREDA SOLO LA CLASE (C), la del producto. Las rutas absolutas son (A) y siguen viniendo del
+# fichero de máquina: heredar una ruta sería devolver el defecto que este registro vino a quitar —
+# una copia apuntando al árbol del original. Y lo derivable (B) se sigue derivando de la propia
+# copia, que es lo que le da SU base de datos.
+#
+# EL CORTE ES POR EL PRIMER `-wt-`, y el caso que lo decide es el worktree ANIDADO. `okoworktree`
+# nombra la copia `<repo>-wt-<nombre>` y el `<nombre>` lo elige quien la crea, así que una copia de
+# una copia es `mesa-fs-wt-a-wt-b`. Por el primero da `mesa-fs`, que SÍ está registrada; por el
+# último daría `mesa-fs-wt-a`, que no lo está —las copias no se dan de alta— y haría falta recursión
+# para llegar al mismo sitio. El primero acierta en los dos niveles sin nada más.
+registro_padre_de() {  # <id> → el id base, o vacío si no es una copia
+    local id="$1"
+    case "$id" in *-wt-*) printf '%s\n' "${id%%-wt-*}" ;; *) return 1 ;; esac
+}
+
+# El id del que hay que leer la clase (C): el propio, si tiene bloque; si no y es una copia cuyo
+# PADRE sí lo tiene, el del padre. Si no, nada — y entonces es una instalación nueva de verdad.
+#
+# Se niega a inventarse un padre: una copia cuyo `<base>` no está registrado se trata como NUEVA. Un
+# fallback que coge el padre equivocado es peor que preguntar.
+registro_origen_de() {  # <fichero> <id> → id del que leer (C), o vacío
+    local f="$1" id="$2" padre
+    registro_existe "$f" "$id" && { printf '%s\n' "$id"; return 0; }
+    padre="$(registro_padre_de "$id")" || return 1
+    registro_existe "$f" "$padre" && { printf '%s\n' "$padre"; return 0; }
+    return 1
+}
+
 # --- (B) derivar de lo que ya está versionado --------------------------------
 # La base de trabajo la dice `src/config.php`, que es el único sitio donde vive.
 registro_db_trabajo() {  # <raíz> <FS_CORE_DIR>
