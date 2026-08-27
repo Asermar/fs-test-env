@@ -55,6 +55,40 @@ NUEVA=0
 HEREDADA=0
 [ -n "$ORIGEN_C" ] && [ "$ORIGEN_C" != "$FS_TEST_ID" ] && HEREDADA=1
 
+# --- UNA COPIA SIN ANCLA NO SE CONFIGURA: FALLA Y PIDE CREARLA -----------------------------------
+#
+# El bloque del proyecto es su ANCLA: el punto del que derivan sus copias. Darla de alta es el paso
+# PREVIO a habilitar worktrees en un super FS, no un residuo de nada.
+#
+# Antes, una copia sin ancla se trataba como instalación nueva, preguntaba los nueve valores y
+# ESCRIBÍA el ancla bajo el id DE LA COPIA. A partir de ahí ninguna copia siguiente encontraba
+# `<proyecto>`, así que cada una se registraba por su cuenta y el registro degeneraba en una entrada
+# por copia — justo lo que se decidió no tener. El ancla la crea el proyecto, no la primera copia.
+#
+# Se aborta AQUÍ, antes de preguntar y antes de escribir: ni el registro versionado ni el fichero de
+# máquina se tocan.
+if [ "$NUEVA" = "1" ] && PADRE_ESPERADO="$(registro_padre_de "$FS_TEST_ID")"; then
+    RAIZ_ANCLA="${FS_PROJECT_ROOT%%-wt-*}"
+    cat >&2 <<FIN
+ERROR: «$FS_TEST_ID» es una COPIA y su instalación de origen, «$PADRE_ESPERADO», no está
+  registrada. No se configura ni se escribe nada.
+
+  El bloque de «$PADRE_ESPERADO» es el ANCLA del proyecto: el punto del que heredan sus copias.
+  Crearlo es el paso PREVIO a trabajar con worktrees aquí, y lo crea el proyecto — no la primera
+  copia que pase. Si lo diera de alta esta copia, quedaría registrada con SU nombre y ninguna copia
+  siguiente encontraría a su padre.
+
+  Créala una vez, desde la raíz del proyecto:
+
+      cd "$RAIZ_ANCLA"
+      $FS_TEST_DIR/bin/init-project.sh
+
+  Eso solo CONFIGURA —no crea base, ni clona el core, ni levanta contenedores—, así que se puede
+  hacer sin montar el entorno. Luego vuelve aquí y repite.
+FIN
+    exit 1
+fi
+
 # valores previos (si ya existe el generado) como defaults
 # shellcheck disable=SC1090
 [ -f "$ENV_FILE" ] && . "$ENV_FILE"
