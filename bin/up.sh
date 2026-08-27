@@ -18,7 +18,7 @@
 #   TESTENV_SERVICE      nombre del servicio en el compose (def: testmesafs -> fs-testenv).
 #   TESTENV_CONTAINER    nombre del contenedor (def: derivado del servicio).
 #   TESTENV_COMPOSE_FILE ruta al compose. Si no se define, se autodetecta bajo la raíz.
-#   FS_PROJECT_ROOT      raíz del proyecto (def: el padre de test-bin/).
+#   FS_PROJECT_ROOT      raíz del proyecto (def: el directorio actual).
 # =============================================================================
 
 set -euo pipefail

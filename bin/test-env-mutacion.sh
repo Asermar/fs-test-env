@@ -15,7 +15,7 @@
 #
 # El core es un CLON de FacturaScripts al que la provisión hace `git pull` y
 # `composer install`. Una dependencia añadida allí se perdería en la siguiente provisión o
-# daría conflicto al actualizar. Así que Infection se instala en este repo (`test-bin`) y
+# daría conflicto al actualizar. Así que Infection se instala en este repo (`fs-test`) y
 # desde aquí se apunta al core.
 #
 # ## Uso
