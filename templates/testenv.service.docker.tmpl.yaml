@@ -29,19 +29,25 @@
       - host.docker.internal:host-gateway
     volumes:
       - @@TESTENV_REPO_PATH@@:@@TESTENV_REPO_PATH@@
+      # El arnés vive FUERA del proyecto y se comparte entre clientes, así que se monta
+      # aparte y de SOLO LECTURA: ninguno debe poder modificar la herramienta del otro. Va
+      # bajo su misma ruta del host por el mismo motivo que el proyecto: que una ruta
+      # resuelva igual dentro y fuera del contenedor.
+      - @@FS_TEST_DIR@@:@@FS_TEST_DIR@@:ro
       - ./.fs-test-env/test.conf:/etc/apache2/sites-enabled/test.conf:ro
     environment:
       TZ: @@FS_TIMEZONE@@
       APACHE_RUN_USER: @@TESTENV_RUN_USER@@
       APACHE_RUN_GROUP: @@TESTENV_RUN_USER@@
       TESTENV_AUTO_PROVISION: "1"
+      FS_PROJECT_ROOT: @@TESTENV_REPO_PATH@@
       CORE_BRANCH: @@CORE_BRANCH@@
     command:
       - /bin/bash
       - -c
       - >-
         if [ "${TESTENV_AUTO_PROVISION:-1}" = "1" ]; then
-        @@TESTENV_REPO_PATH@@/test-bin/bin/test-env-provision.sh || echo "WARN: provisión del entorno de pruebas fallida; arranco igualmente.";
+        FS_PROJECT_ROOT=@@TESTENV_REPO_PATH@@ @@FS_TEST_DIR@@/bin/test-env-provision.sh || echo "WARN: provisión del entorno de pruebas fallida; arranco igualmente.";
         fi;
         exec apache2-foreground
     labels:

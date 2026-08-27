@@ -11,15 +11,30 @@
 # No hardcodea nada del proyecto: pregunta (o toma de entorno / del .env existente)
 # y sustituye los placeholders @@VAR@@ de las plantillas.
 #
-# Uso:  test-bin/bin/init-project.sh            (interactivo)
-#       VAR=... test-bin/bin/init-project.sh    (no interactivo, toma de entorno)
+# Uso:  <arnés>/bin/init-project.sh            (interactivo)
+#       VAR=... <arnés>/bin/init-project.sh    (no interactivo, toma de entorno)
 # =============================================================================
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # test-bin/bin
-SUBMODULE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"                # test-bin
-FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$(cd "$SUBMODULE_DIR/.." && pwd)}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # <arnés>/bin
+FS_TEST_DIR="${FS_TEST_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"  # el arnés: derivado de dónde vive ESTE script
+
+# La raíz del PROYECTO ya no se puede deducir de dónde vive el arnés: desde que vive fuera
+# (`~/Dev/Tooling/fs-test`), su directorio padre es Tooling y no el proyecto de nadie. Se deriva del
+# REPOSITORIO en el que estás —que es lo que no se rompe al mudar nada— y, si eso no dice nada útil,
+# del directorio actual. `FS_PROJECT_ROOT` sigue mandando sobre todo, para invocaciones no estándar.
+FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || echo "$PWD")}"
+
+# Precondición, y falla ruidosamente a propósito: si lo de arriba ha resuelto al propio arnés, es que
+# se ha lanzado desde su carpeta sin decir sobre qué proyecto. Configurar «el arnés sobre sí mismo»
+# escribiría un `.fs-test-env.env` dentro del producto compartido por dos clientes.
+if [ "$FS_PROJECT_ROOT" = "$FS_TEST_DIR" ]; then
+    echo "ERROR: se ha resuelto la raíz del proyecto al propio arnés ($FS_TEST_DIR)." >&2
+    echo "  Arreglo: lánzalo desde la raíz del proyecto que quieres configurar," >&2
+    echo "           o dilo explícitamente: FS_PROJECT_ROOT=/ruta/del/proyecto $0" >&2
+    exit 1
+fi
 
 ENV_FILE="$FS_PROJECT_ROOT/.fs-test-env.env"
 OUT_DIR="$FS_PROJECT_ROOT/.fs-test-env"
@@ -46,6 +61,7 @@ ask() {  # ask VAR "pregunta" "default"
 echo ">> Configuración del entorno de test para: $FS_PROJECT_ROOT"
 ask FS_CORE_DIR            "Carpeta del core (src | .)" "src"
 ask TESTENV_REPO_PATH      "Ruta absoluta del proyecto (host=contenedor)" "$FS_PROJECT_ROOT"
+ask FS_TEST_DIR            "Ruta absoluta del arnés (host=contenedor)" "$FS_TEST_DIR"
 ask TEST_DB                "Nombre de la BD de pruebas" "fs_test"
 ask CORE_REPO              "Repositorio del core" "https://github.com/NeoRazorX/facturascripts.git"
 ask CORE_BRANCH            "Rama o tag del core (vacío = versión instalada, v<Kernel::version()>)" ""
@@ -75,9 +91,10 @@ ENABLE_LIST="${ENABLE_LIST:-}"
 # --- escribir .fs-test-env.env ---
 umask 077
 cat > "$ENV_FILE" <<EOF
-# Generado por test-bin/bin/init-project.sh. Config del despliegue del entorno de test.
+# Generado por <arnés>/bin/init-project.sh. Config del despliegue del entorno de test.
 FS_CORE_DIR="$FS_CORE_DIR"
 TESTENV_REPO_PATH="$TESTENV_REPO_PATH"
+FS_TEST_DIR="$FS_TEST_DIR"
 TESTENV_DIR="$TESTENV_DIR"
 TEST_DB="$TEST_DB"
 CORE_REPO="$CORE_REPO"
@@ -105,6 +122,7 @@ render() {  # render <plantilla>
     sed \
         -e "s#@@FS_CORE_DIR@@#${FS_CORE_DIR}#g" \
         -e "s#@@TESTENV_REPO_PATH@@#${TESTENV_REPO_PATH}#g" \
+        -e "s#@@FS_TEST_DIR@@#${FS_TEST_DIR}#g" \
         -e "s#@@TESTENV_DIR@@#${TESTENV_DIR}#g" \
         -e "s#@@TEST_DB@@#${TEST_DB}#g" \
         -e "s#@@CORE_BRANCH@@#${CORE_BRANCH}#g" \
@@ -121,11 +139,11 @@ render() {  # render <plantilla>
         "$1"
 }
 
-SERVICE_TMPL="$SUBMODULE_DIR/templates/testenv.service.$CONTAINER_ENGINE.tmpl.yaml"
+SERVICE_TMPL="$FS_TEST_DIR/templates/testenv.service.$CONTAINER_ENGINE.tmpl.yaml"
 [ -f "$SERVICE_TMPL" ] || { echo "ERROR: no existe la plantilla $SERVICE_TMPL" >&2; exit 1; }
 
 mkdir -p "$OUT_DIR"
-render "$SUBMODULE_DIR/templates/test.conf.tmpl" > "$OUT_DIR/test.conf"
+render "$FS_TEST_DIR/templates/test.conf.tmpl" > "$OUT_DIR/test.conf"
 render "$SERVICE_TMPL"                            > "$OUT_DIR/service.yaml"
 echo "   renderizado $OUT_DIR/test.conf"
 echo "   renderizado $OUT_DIR/service.yaml  (motor: $CONTAINER_ENGINE)"
@@ -151,7 +169,7 @@ Entorno de test configurado (motor: $CONTAINER_ENGINE).
    (./.fs-test-env/test.conf -> /etc/apache2/sites-enabled/test.conf).
 
 3) Provisiona el entorno:
-     - en el host:      test-bin/bin/setup-test-env.sh   (interactivo)
+     - en el host:      \$FS_TEST_DIR/bin/setup-test-env.sh   (interactivo)
      - o en contenedor: se ejecuta test-env-provision.sh al arrancar.
 ================================================================
 EOF

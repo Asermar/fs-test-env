@@ -2,10 +2,10 @@
     ServerName @@TESTENV_HOST@@
     ServerAdmin webmaster@localhost
 
-    # App del runner de tests, servida desde el submódulo fs-test-env (test-bin/web).
+    # App del runner de tests, servida desde el arnés, que vive FUERA del proyecto.
     # El repo se monta dentro del contenedor en su MISMA ruta absoluta que en el host,
     # para que los symlinks de los plugins y las rutas que resuelve PHPUnit funcionen igual.
-    DocumentRoot @@TESTENV_REPO_PATH@@/test-bin/web/public
+    DocumentRoot @@FS_TEST_DIR@@/web/public
     DirectoryIndex index.php
 
     # Exponemos a PHP la configuración del despliegue (leída por el runner web).
@@ -14,7 +14,7 @@
     SetEnv TESTENV_DIR "@@TESTENV_DIR@@"
     SetEnv TEST_WEB_TITLE "@@TEST_WEB_TITLE@@"
 
-    <Directory @@TESTENV_REPO_PATH@@/test-bin/web/public>
+    <Directory @@FS_TEST_DIR@@/web/public>
         Options -Indexes +FollowSymLinks
         AllowOverride None
         Require all granted

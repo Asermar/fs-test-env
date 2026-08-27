@@ -17,9 +17,21 @@ require __DIR__ . '/../src/TestRunner.php';
 use TestWeb\TestScanner;
 use TestWeb\TestRunner;
 
-// raíz del proyecto FacturaScripts. La app vive en test-bin/web/public, así que
-// subimos 3 niveles (public -> web -> test-bin -> raíz). Override con FS_PROJECT_ROOT.
-$base = getenv('FS_PROJECT_ROOT') ?: dirname(__DIR__, 3);
+// Raíz del proyecto FacturaScripts. La dice SIEMPRE `FS_PROJECT_ROOT`, que el vhost pone con
+// `SetEnv`: desde que el arnés vive fuera del proyecto, subir niveles desde aquí ya no lleva a
+// ningún proyecto, lleva a la carpeta donde está instalado el arnés.
+//
+// Y si falta, se para en vez de adivinar. Un runner apuntando a la carpeta equivocada no da error:
+// da una lista de tests vacía, que se lee como «este proyecto no tiene tests».
+$base = getenv('FS_PROJECT_ROOT') ?: '';
+if ('' === $base || false === is_dir($base)) {
+    http_response_code(500);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "No se sabe sobre qué proyecto trabajar.\n"
+        . "Arreglo: el vhost tiene que declarar SetEnv FS_PROJECT_ROOT con la raíz del proyecto;\n"
+        . "lo genera <arnés>/bin/init-project.sh en .fs-test-env/test.conf.\n";
+    exit;
+}
 
 $action = $_GET['action'] ?? '';
 

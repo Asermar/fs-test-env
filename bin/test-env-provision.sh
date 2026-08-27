@@ -20,12 +20,25 @@
 
 set -euo pipefail
 
-# Directorio de este script (test-bin/bin).
+# Directorio de este script (<arnés>/bin).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FS_TEST_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Raíz del proyecto FacturaScripts: por defecto el padre de test-bin/ (submódulo).
-# Sobreescribible con FS_PROJECT_ROOT para despliegues no estándar.
-FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+# Raíz del proyecto FacturaScripts. Desde que el arnés vive FUERA del proyecto, subir dos niveles
+# desde aquí ya no da un proyecto: da la carpeta donde está instalado el arnés. Así que quien invoca
+# la dice —el compose la pasa en `FS_PROJECT_ROOT`— y, si no la dice, se prueba el directorio actual
+# por si se lanzó a mano desde el proyecto.
+FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$PWD}"
+
+# Precondición, y falla antes de escribir nada: sin esto, el provisionador seguiría adelante contra
+# una carpeta que no es un proyecto y el fallo aparecería más tarde y hablando de otra cosa.
+if [ ! -f "$FS_PROJECT_ROOT/.fs-test-env.env" ]; then
+    echo "ERROR: '$FS_PROJECT_ROOT' no parece un proyecto configurado: no tiene .fs-test-env.env." >&2
+    echo "  Arreglo: lánzalo desde la raíz del proyecto, o dilo:" >&2
+    echo "           FS_PROJECT_ROOT=/ruta/del/proyecto $0" >&2
+    echo "  Si el proyecto aún no está configurado: $FS_TEST_DIR/bin/init-project.sh" >&2
+    exit 1
+fi
 
 # Config del despliegue (generada por bin/init-project.sh). Sin valores hardcodeados:
 # lo que no venga por entorno ni por este fichero cae en los defaults genéricos.
