@@ -249,6 +249,30 @@ class CsvImportPresentTest extends TestCase
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
 
+### 3.0.0 — El arnés sale del proyecto que prueba
+
+Cambio **mayor** porque rompe a quien lo invocaba por su ruta anterior: el arnés ya no vive dentro de
+cada instalación como `test-bin/`, sino aparte —en la instalación de herramientas de la casa— y
+compartido por los proyectos que lo usan. Quien lo llamara como `test-bin/bin/…` tiene que apuntar a
+donde esté instalado.
+
+- **Vivía dentro del proyecto que prueba y daba por hecho que el proyecto estaba justo encima.** La
+  raíz salía de subir niveles desde su propia carpeta; fuera, eso ya no lleva a ningún proyecto.
+  Ahora **la dice quien invoca** (`FS_PROJECT_ROOT`) y, si no la dice, se prueba el directorio
+  actual.
+- **Las tres derivaciones que se rompían fallan con mensaje en vez de resolver a la carpeta
+  equivocada.** `init-project.sh` deduce la raíz del **repositorio** —lo único que no se mueve al
+  mudar carpetas— y se niega si eso resuelve al propio arnés; `test-env-provision.sh` se niega si la
+  raíz no tiene `.fs-test-env.env`; y el runner web ya no sube tres niveles. El del runner era el
+  peor de los tres: callarse ahí no daba error, daba una lista de tests **vacía**, que se lee como
+  «este proyecto no tiene tests».
+- **Las plantillas montan el arnés aparte y de solo lectura**, bajo su misma ruta del host. En solo
+  lectura porque lo comparten varios proyectos y ninguno debe poder modificar la herramienta del
+  otro; bajo su misma ruta por lo mismo que ya se monta así el proyecto: que una ruta signifique lo
+  mismo dentro y fuera del contenedor.
+- **Nombre.** `test-bin` sonaba a la instalación de pruebas, y la instalación de pruebas es
+  `test-env`, que es otra cosa y la sigue creando el arnés dentro de cada proyecto.
+
 ### 2.2.1 — El arnés deja de callarse, y la contraseña deja de salir
 
 - **2.2.1** — **El warm-up del esquema fallaba en silencio.** Iba envuelto en `2>/dev/null` y sin
