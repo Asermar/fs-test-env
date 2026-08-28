@@ -20,6 +20,11 @@
 # principal. Provisionar de verdad clona el core y crea una base, así que no cabe
 # en una batería autocontenida — eso se verifica a mano, con `okoworktree`.
 #
+# Y **el PARSEO de opciones**, que sí cabe: que `--recrear-bd` se acepta y que lo
+# desconocido se rechaza. Lo que NO cabe aquí es que el DROP ocurra de verdad —eso
+# necesita una base—; se verifica a mano y queda dicho para que nadie lea esta
+# batería como si acreditara el refresco.
+#
 # Que un worktree «pasa» se comprueba por lo que ocurre DESPUÉS: el provisionador
 # se para en la comprobación siguiente (falta `.fs-test-env.env`), y eso solo
 # puede pasar si la guarda lo dejó seguir.
@@ -82,6 +87,29 @@ SAL="$(corre "$BASE/principal" --en-el-principal)"
 grep -qF 'checkout PRINCIPAL, y el entorno' <<<"$SAL" && mal "sigue rechazando con el flag" || ok "el flag deja pasar"
 grep -qF 'AVISO: provisionando en el checkout PRINCIPAL' <<<"$SAL" && ok "…y AVISA cada vez que se usa" \
     || mal "el escape es silencioso"
+
+printf '\n\033[1;36m— el PARSEO: --recrear-bd se acepta, lo desconocido se RECHAZA —\033[0m\n'
+# Que `--recrear-bd` se acepta se comprueba por lo que ocurre DESPUÉS, igual que arriba con la
+# guarda: el provisionador avanza hasta la comprobación siguiente (falta `.fs-test-env.env`), y a
+# esa sólo se llega si el parseo lo dejó pasar.
+SAL="$(corre "$BASE/copia" --recrear-bd)"
+grep -qF 'no parece un proyecto configurado' <<<"$SAL" && ok "--recrear-bd pasa el parseo y sigue" \
+    || mal "--recrear-bd no llega a la comprobación siguiente: el parseo lo paró"
+grep -qF 'opción desconocida' <<<"$SAL" && mal "trata --recrear-bd como desconocido" || ok "…y no lo toma por desconocido"
+
+# EL CASO QUE MOTIVA EL RECHAZO: un typo. Antes se IGNORABA en silencio —medido: rc y salida
+# idénticos a no pasar nada—, así que la provisión seguía SIN refrescar la base y salía 0. Quien lo
+# invocó creería tener una base limpia y tendría la de antes.
+SAL="$(corre "$BASE/copia" --recrear-db)"; RC=$?
+[ "$RC" -ne 0 ] && ok "un typo (--recrear-db) FALLA (rc $RC) en vez de ignorarse" || mal "un typo se ignora: refrescaría nada y saldría 0"
+grep -qF -- '--recrear-db' <<<"$SAL" && ok "…y NOMBRA el flag que no entendió" || mal "no dice cuál era"
+grep -qF -- '--recrear-bd' <<<"$SAL" && ok "…y enseña el que sí existe" || mal "no ofrece la opción buena"
+[ -d "$BASE/copia/test-env" ] && mal "creó test-env/ pese a rechazar el flag" || ok "y no creó nada"
+
+# El negativo del parseo: el flag legítimo de la guarda sigue funcionando (no se ha cerrado de más).
+SAL="$(corre "$BASE/principal" --en-el-principal)"
+grep -qF 'opción desconocida' <<<"$SAL" && mal "el parseo estricto se comió --en-el-principal" \
+    || ok "y --en-el-principal sigue aceptándose"
 
 printf '\n'
 [ "$FALLOS" -eq 0 ] && { printf '\033[1;32m%s comprobaciones, todas en verde.\033[0m\n' "$OK"; exit 0; }

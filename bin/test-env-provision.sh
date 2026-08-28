@@ -16,6 +16,22 @@
 #   CORE_BRANCH  rama del core   (def: master)
 #   TEST_DB      BD de pruebas   (def: mesafs_test)
 #   ENABLE_LIST  plugins a activar, separados por coma (def: todos los enlazados)
+#
+# Opciones:
+#   --recrear-bd        TIRA la BD de pruebas y la vuelve a crear vacía, conservando el clon del
+#                       core y su vendor. Para cuando los ficheros están bien y los DATOS están
+#                       sucios, que es el caso frecuente y barato: recrear la base cuesta lo que
+#                       tarda el warm-up; el clon y el composer install cuestan minutos.
+#                       OJO A LO QUE NO ES: no deja la base vacía al terminar. Sólo cambia el paso
+#                       3; el resto de la provisión —config, enlaces, activación y warm-up— se
+#                       ejecuta igual, así que la base acaba CON SU ESQUEMA y con la pizarra
+#                       limpia, indistinguible de una recién creada. Eso es lo que se quiere: que
+#                       una base refrescada y una nueva no difieran en nada.
+#   --en-el-principal   escape para provisionar en el checkout PRINCIPAL (ver más abajo; avisa).
+#
+# Lo que no se reconozca hace FALLAR la invocación (rc 2) en vez de ignorarse. El motivo está
+# junto al parseo, y es el modo de fallo de --recrear-bd: un typo que se tragara provisionaría
+# sin refrescar la base y saldría 0.
 # =============================================================================
 
 set -euo pipefail
@@ -71,7 +87,36 @@ FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$PWD}"
 # historial, en el script que lo llame y en el botón que lo dispare.
 # =============================================================================================
 PERMITIR_PRINCIPAL=0
-for _a in "$@"; do [ "$_a" = '--en-el-principal' ] && PERMITIR_PRINCIPAL=1; done
+RECREAR_BD=0
+# LO QUE NO RECONOCEMOS SE RECHAZA, y no es celo: es el modo de fallo de `--recrear-bd`.
+#
+# Hasta ahora un argumento desconocido se IGNORABA en silencio — medido: `--basura` daba rc y salida
+# idénticos a no pasar nada. Con un flag que refresca la base, eso se vuelve caro en la dirección
+# peor: `--recrear-bd` mal escrito (`--recrear-db`) se tragaría, la provisión seguiría **sin
+# refrescar** y saldría 0. Quien lo invocó creería tener una base limpia y tendría la de antes, así
+# que el siguiente verde sería un verde sobre base sucia — el daño exacto que este flag existe para
+# evitar. Es la misma decisión que Alexis tomó para `--keep-db`: un flag que ya no significa lo que
+# quien lo escribió cree tiene que FALLAR, no ignorarse.
+#
+# Medido antes de cerrar la puerta: hoy NADIE le pasa argumentos —el compose de los dos clientes, las
+# dos plantillas, `setup-test-env.sh` y `okoworktree` lo invocan pelado—, así que no hay llamador que
+# romper.
+for _a in "$@"; do
+    case "$_a" in
+        --en-el-principal) PERMITIR_PRINCIPAL=1 ;;
+        --recrear-bd)      RECREAR_BD=1 ;;
+        *)
+            echo "ERROR: opción desconocida: '$_a'." >&2
+            echo "  Las que hay:" >&2
+            echo "    --recrear-bd        tira la BD de pruebas y la vuelve a crear vacía, conservando" >&2
+            echo "                        el clon del core y su vendor; el esquema se rehace después." >&2
+            echo "    --en-el-principal   escape para provisionar en el checkout principal (avisa)." >&2
+            echo "  No se ignora a propósito: un '--recrear-bd' mal escrito provisionaría sin" >&2
+            echo "  refrescar la base y saldría 0, y el siguiente 'verde' sería sobre datos viejos." >&2
+            exit 2
+            ;;
+    esac
+done
 
 _git_dir="$(git -C "$FS_PROJECT_ROOT" rev-parse --absolute-git-dir 2>/dev/null || true)"
 _git_comun="$(git -C "$FS_PROJECT_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
@@ -180,7 +225,7 @@ printf '%s================================================================%s\n' 
 printf '%sProvisión del entorno de pruebas%s\n' "$C_STEP" "$C_RESET"
 echo "Core    : $CORE_REPO ($CORE_BRANCH)"
 echo "Destino : $TESTENV_DIR"
-echo "BD test : $TEST_DB @ $DB_HOST:$DB_PORT (user $DB_USER)"
+echo "BD test : $TEST_DB @ $DB_HOST:$DB_PORT (user $DB_USER)$([ "$RECREAR_BD" -eq 1 ] && echo ' — SE RECREA: DROP + CREATE' || true)"
 printf '%s================================================================%s\n' "$C_STEP" "$C_RESET"
 
 # --- 1) clonar o actualizar el core (requiere git) ---
@@ -223,8 +268,41 @@ else
     ( cd "$TESTENV_DIR" && "${STDBUF[@]}" composer install --no-interaction --no-progress )
 fi
 
-# --- 3) crear la BD de pruebas si no existe ---
-log_step "Creando BD de pruebas (si falta)..."
+# --- 3) crear la BD de pruebas (o RECREARLA con --recrear-bd) ---
+#
+# ## POR QUÉ HACÍA FALTA UN FLAG, Y NO ERA EL TEARDOWN
+#
+# `CREATE DATABASE IF NOT EXISTS` no recrea nada: reaprovisionar sobre una base que ya existe la
+# reusa tal cual, así que los datos de corridas anteriores SOBREVIVEN A TODOS LOS
+# REAPROVISIONAMIENTOS. No es que nadie limpiara: es que no había con qué. Medido en su día sobre
+# `mesafs_test`: 112 filas ajenas en `clientes`, 8 en `users`, 4 en `okoimport_formatos`. Y un
+# «tests en verde» sobre eso es un verde sobre una base sucia, que sólo se nota cuando un test
+# cuenta filas sin filtrar — o sea, cuando ya ha dado una respuesta equivocada.
+#
+# El teardown NO era el sitio: ya tira la base POR DEFECTO (`DROP DATABASE IF EXISTS`, y su
+# cabecera lo declara). Lo que faltaba es la mitad barata —refrescar los DATOS conservando los
+# FICHEROS—, y ésa es del provisionador porque es él quien reconstruye el esquema justo después.
+#
+# ## LA COLACIÓN ES LA MISMA A PROPÓSITO
+#
+# `utf8mb4` / `utf8mb4_unicode_520_ci`, que es lo que ya usaba este paso y lo que declara el
+# `config.php` generado más abajo (`FS_MYSQL_COLLATE`). Si el refresco creara la base con otra, una
+# base refrescada y una recién creada diferirían en algo que nadie mira hasta que un test compara
+# cadenas y falla sólo en una de las dos.
+#
+# ## Y SE COMPRUEBA EL EFECTO, NO QUE EL COMANDO VOLVIERA
+#
+# Antes se ignoraba el retorno de `query()`. Con un DROP eso es lo peor que se puede hacer: si el
+# usuario no tuviera permiso para tirar la base, el DROP fallaría, el `CREATE IF NOT EXISTS` no
+# haría nada porque la base sigue ahí, y este paso imprimiría «BD lista» con toda la basura dentro.
+# Un fallo reportado como éxito. Así que se mira cada retorno y, al recrear, se PREGUNTA POR
+# CONSULTA que la base quedó vacía: es la postcondición, y es lo único que distingue «la refresqué»
+# de «creí refrescarla».
+if [ "$RECREAR_BD" -eq 1 ]; then
+    log_step "Recreando la BD de pruebas ($TEST_DB): DROP + CREATE..."
+else
+    log_step "Creando BD de pruebas (si falta)..."
+fi
 # LA CONTRASEÑA NO VA EN argv. Un argumento de proceso se lee en `/proc/<pid>/cmdline`, que es
 # LEGIBLE POR CUALQUIER USUARIO de la máquina: no hace falta que nadie pegue un log, basta un `ps`
 # en el momento justo. El entorno no: `/proc/<pid>/environ` es 0400 del propio usuario. Lo estricto
@@ -234,9 +312,37 @@ FS_TEST_DB_PASS="$DB_PASS" php -r '
 $m = new mysqli($argv[1], $argv[3], (string) getenv("FS_TEST_DB_PASS"), "", (int)$argv[2]);
 if ($m->connect_errno) { fwrite(STDERR, "conexion: ".$m->connect_error."\n"); exit(1); }
 $db = $m->real_escape_string($argv[5]);
-$m->query("CREATE DATABASE IF NOT EXISTS `$db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci");
-echo "   BD lista: $argv[5]\n";
-' "$DB_HOST" "$DB_PORT" "$DB_USER" "" "$TEST_DB"
+$recrear = $argv[6] === "1";
+if ($recrear && !$m->query("DROP DATABASE IF EXISTS `$db`")) {
+    fwrite(STDERR, "ERROR: no se pudo tirar la BD de pruebas: ".$m->error."\n");
+    fwrite(STDERR, "  Sin esto la base conserva los datos de la corrida anterior, así que no sigo:\n");
+    fwrite(STDERR, "  un verde sobre datos viejos es peor que una provisión que falla.\n");
+    exit(1);
+}
+if (!$m->query("CREATE DATABASE IF NOT EXISTS `$db` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_520_ci")) {
+    fwrite(STDERR, "ERROR: no se pudo crear la BD de pruebas: ".$m->error."\n");
+    exit(1);
+}
+if (!$recrear) { echo "   BD lista: $argv[5]\n"; exit(0); }
+// POSTCONDICIÓN del refresco: la base existe y está VACÍA. Lo afirma una CONSULTA, no el hecho de
+// que los comandos volvieran. Se pregunta por DATABASE() tras seleccionarla, y no por un literal
+// con el nombre, por dos motivos: el `select_db` ya falla si la base no llegó a crearse (así que
+// cubre las dos mitades de la postcondición), y este PHP viaja dentro de comillas simples de bash,
+// donde meter comillas para un literal SQL es justo donde se cuela un error de escapado.
+if (!$m->select_db($argv[5])) {
+    fwrite(STDERR, "ERROR: la BD «$argv[5]» no existe tras el CREATE: ".$m->error."\n");
+    exit(1);
+}
+$r = $m->query("SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()");
+if (!$r) { fwrite(STDERR, "ERROR: no pude comprobar que la BD quedó vacía: ".$m->error."\n"); exit(1); }
+$n = (int) $r->fetch_assoc()["n"];
+if ($n !== 0) {
+    fwrite(STDERR, "ERROR: la BD «$argv[5]» conserva $n tabla(s) tras el DROP+CREATE.\n");
+    fwrite(STDERR, "  El refresco NO ocurrió, aunque los comandos no dieran error.\n");
+    exit(1);
+}
+echo "   BD recreada y vacía (0 tablas): $argv[5]\n";
+' "$DB_HOST" "$DB_PORT" "$DB_USER" "" "$TEST_DB" "$RECREAR_BD"
 
 # --- 4) config.php del core apuntando a la BD de pruebas ---
 log_step "Escribiendo config.php de pruebas..."
