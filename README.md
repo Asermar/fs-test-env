@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.0.0-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.1.0-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -139,6 +139,37 @@ además de la instalada, las **5 versiones (tags) más recientes** del repo de o
   (`JUnitParser`), así que es fiable aunque `stdout` se trunque. En fallo de parámetros/entorno
   (`"ok": false`) trae `error` con el motivo, sin `totals`.
 
+## Las baterías del arnés
+
+**`test/registro.sh`** — comprueba el **registro de instalaciones**: que una copia hereda la
+configuración de producto de su ancla, que una instalación nueva de verdad sigue preguntando, que una
+copia sin ancla falla en vez de registrarse, y que las guardas de la base de test siguen viendo a las
+copias. **22 comprobaciones, en torno a un segundo.**
+
+**`test/provision.sh`** — comprueba la guarda del provisionador: que **el entorno de test vive en
+una copia, no en el checkout principal**. 12 comprobaciones, ~0,15 s.
+
+```bash
+test/registro.sh                  # desde la raíz del arnés
+test/provision.sh
+test/registro.sh /ruta/al/arnes   # o diciéndole dónde está
+```
+
+Sale **0** si todo está en verde y **1** si algo falla, así que sirve de puerta en un script.
+
+**Son autocontenidas**: se fabrican sus instalaciones y sus repos de pega en un temporal y lo borra al salir, así que
+**no toca el registro versionado, ni el fichero de máquina, ni ningún proyecto real**. No necesita
+contenedores, ni base de datos, ni red — se puede correr en cualquier momento, también con el entorno
+apagado.
+
+> **Este repo no tiene CI, ni Makefile, ni hook que la ejecute**, y `okorelease` tampoco la exige. O
+> sea que la única forma de que se ejecute es que alguien la invoque: pásala **antes de cerrar una
+> rama** que toque `bin/init-project.sh`, `bin/lib/registro.sh` o `bin/test-env-provision.sh`.
+
+> **Nació después del código que comprueba**, así que su valor es de **regresión**: atrapa lo que se
+> rompa de aquí en adelante, no acredita que lo ya escrito se hiciera con ella delante. Está dicho
+> también en su propia cabecera, que es donde lo leerá quien la abra.
+
 ## Testing de mutación
 
 La cobertura dice qué líneas se ejecutaron; **no** dice si los tests fallarían con el código mal.
@@ -248,6 +279,33 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.1.0 — La configuración del entorno de test sale del repo del cliente
+
+- **El `.fs-test-env.env` y sus dos piezas renderizadas dejan de estar versionados en el repo de cada
+  cliente.** Guardaban rutas absolutas de la máquina y el nombre de la base **dentro** del repo del
+  cliente, así que una copia de trabajo nacía sucia solo por existir y podía apuntar al entorno de
+  test del original — lo que ya causó una contaminación real. Ahora los **genera** `init-project.sh`
+  desde el registro, y antes de desversionarlos se comprobó que salen **byte a byte idénticos**.
+- **Un registro de instalaciones, `config/instalaciones.conf`, indexado por INSTALACIÓN y no por
+  máquina** — porque un worktree es una instalación más. Guarda solo configuración de producto: lo
+  que es de la máquina no viaja a ningún repo, y lo derivable se deriva en vez de guardarse.
+- **Una copia hereda de su ancla la configuración de producto**, así que `okoworktree add` —que es no
+  interactivo por diseño— ya no se queda pidiendo nueve valores por teclado. El corte del id va por
+  el **primer** `-wt-`, que acierta también en una copia de una copia sin necesidad de recursión.
+- **Una copia sin ancla falla y pide crearla**, en vez de darse de alta ella misma: si lo hiciera, la
+  entrada quedaría con el nombre de la copia y ninguna copia siguiente encontraría a su padre.
+- **El provisionador se niega en el checkout principal.** El entorno de test vive en la copia, y la
+  existencia de la copia es su declaración de propiedad. La señal es de git —`--absolute-git-dir`
+  frente a `--git-common-dir`—, no el nombre de la carpeta: un worktree hecho a mano sin la
+  convención es legítimo, y una carpeta llamada `…-wt-…` que es un repo normal no lo es. Con escape
+  explícito, `--en-el-principal`, que avisa por stderr cada vez que se usa.
+- **Los dos primeros tests que este repo ha tenido**: `test/registro.sh` (22 comprobaciones, ~1 s) y
+  `test/provision.sh` (12, ~0,15 s). Autocontenidos: se fabrican sus instalaciones de pega en un
+  temporal, no necesitan contenedor ni base ni red, y no tocan el registro ni ningún proyecto real.
+- **Arreglo**: un compose **sin router de traefik** mataba al generador con `unbound variable` al
+  escribir `TEST_WEB_URL`. Ahora los derivados que no se pueden calcular quedan **vacíos**, que es lo
+  que significan. Le habría pasado de lleno a una instalación local o con docker.
 
 ### 3.0.0 — El arnés sale del proyecto que prueba
 

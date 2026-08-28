@@ -30,6 +30,79 @@ FS_TEST_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # por si se lanzó a mano desde el proyecto.
 FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$PWD}"
 
+# =============================================================================================
+# EL ENTORNO DE TEST VIVE EN UNA COPIA, NO EN EL CHECKOUT PRINCIPAL
+#
+# Decisión de Alexis (27-ago-2026): con desarrollo basado en worktrees el entorno vive en la copia,
+# y **la existencia de la copia es su declaración de propiedad** — si la copia existe tiene dueño;
+# si no existe, el entorno es basura. Los entornos de los principales se retiraron ese día.
+#
+# Esto es el instrumento de esa decisión: sin él, un `test-env-provision.sh` en el principal lo
+# recrea entero y la decisión dura lo que tarde alguien en ejecutarlo por costumbre.
+#
+# ## LA SEÑAL, y NO es la que parece
+#
+#     git rev-parse --absolute-git-dir              vs.  --path-format=absolute --git-common-dir
+#     iguales → checkout PRINCIPAL                        distintos → WORKTREE
+#
+# **«El `.git` es un fichero» NO sirve**, y el error habría sido invisible donde importa: en un
+# SUBMÓDULO el `.git` también es un fichero. Medido sobre los cuatro casos reales de esta casa —
+# `Mesa/FS` (directorio), `Mesa/FS/src/Plugins/OkoTranslate` (fichero), `Tooling/fs-test` (fichero)
+# y un worktree (fichero)—: con el tipo de `.git`, los dos submódulos saldrían «worktree». Y los
+# clientes son superproyectos llenos de submódulos, así que habría acertado en la raíz y mordido en
+# cada plugin.
+#
+# ## POR QUÉ LA SEÑAL DE GIT Y NO EL ID `-wt-` DEL REGISTRO
+#
+# Porque el id es un NOMBRE, y un nombre falla en las dos direcciones. Medido:
+#
+#   - un worktree creado a mano SIN la convención (`FS-arreglourgente`) → git dice worktree, el id
+#     dice «no es copia»: con el id se RECHAZARÍA trabajo legítimo;
+#   - una carpeta llamada `FS-wt-falso` que es un repo normal → git dice principal, el id dice «es
+#     copia»: con el id se DEJARÍA PASAR justo lo que hay que impedir.
+#
+# La regla habla del ÁRBOL DE TRABAJO, no de cómo se llame. Así que la señal es la de git.
+#
+# ## EL ESCAPE ES UN FLAG, NO UNA VARIABLE, y a propósito
+#
+# Un rechazo sin salida acaba bloqueando algo legítimo. Pero una variable de entorno se exporta una
+# vez y se olvida —en un perfil, en un compose— y a partir de ahí el rechazo no rechaza nada, en
+# silencio. Un flag tiene que escribirse en CADA invocación, así que queda a la vista en el
+# historial, en el script que lo llame y en el botón que lo dispare.
+# =============================================================================================
+PERMITIR_PRINCIPAL=0
+for _a in "$@"; do [ "$_a" = '--en-el-principal' ] && PERMITIR_PRINCIPAL=1; done
+
+_git_dir="$(git -C "$FS_PROJECT_ROOT" rev-parse --absolute-git-dir 2>/dev/null || true)"
+_git_comun="$(git -C "$FS_PROJECT_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+if [ -n "$_git_dir" ] && [ "$_git_dir" = "$_git_comun" ] && [ "$PERMITIR_PRINCIPAL" = 0 ]; then
+    cat >&2 <<FIN
+ERROR: «$FS_PROJECT_ROOT» es el checkout PRINCIPAL, y el entorno de test no vive aquí.
+
+  Con desarrollo por worktrees el entorno vive en la COPIA, y la existencia de la copia es su
+  declaración de propiedad: si la copia existe tiene dueño, y si no existe el entorno es basura.
+  Provisionar en el principal devuelve un entorno que nadie reclama y que nadie retira.
+
+  Crea la copia y provisiona ahí:
+
+      okoworktree add <nombre> --db-mode fresh
+
+  Eso levanta su stack y provisiona su entorno de test, con SU base de datos.
+
+  Si de verdad hace falta aquí —y conviene decir por qué antes de hacerlo— el escape es explícito y
+  hay que escribirlo en cada invocación:
+
+      $0 --en-el-principal
+
+  Es un flag y no una variable de entorno a propósito: una variable se exporta una vez y se olvida,
+  y a partir de ahí este rechazo dejaría de rechazar sin que nadie lo notara.
+FIN
+    exit 1
+fi
+[ "$PERMITIR_PRINCIPAL" = 1 ] && [ "$_git_dir" = "$_git_comun" ] && \
+    echo "AVISO: provisionando en el checkout PRINCIPAL con --en-el-principal. El entorno queda sin dueño." >&2
+
+
 # Precondición, y falla antes de escribir nada: sin esto, el provisionador seguiría adelante contra
 # una carpeta que no es un proyecto y el fallo aparecería más tarde y hablando de otra cosa.
 if [ ! -f "$FS_PROJECT_ROOT/.fs-test-env.env" ]; then
