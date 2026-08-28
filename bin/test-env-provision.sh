@@ -20,8 +20,14 @@
 # Opciones:
 #   --recrear-bd        TIRA la BD de pruebas y la vuelve a crear vacía, conservando el clon del
 #                       core y su vendor. Para cuando los ficheros están bien y los DATOS están
-#                       sucios, que es el caso frecuente y barato: recrear la base cuesta lo que
-#                       tarda el warm-up; el clon y el composer install cuestan minutos.
+#                       sucios.
+#                       NO ES MÁS RÁPIDO QUE teardown + provisión, y está medido: 105,6 s frente a
+#                       99,5 s (Mesa/FS, 28-ago-2026, una pasada de cada una en la misma copia).
+#                       Casi todo el coste es el warm-up del esquema —89 s— y lo pagan las dos
+#                       vías; lo que esto ahorra es el clon (6 s) y el composer install (3 s en
+#                       frío). Lo que sí aporta: es UNA orden en vez de dos, así que no hay una
+#                       ventana en la que el entorno no exista, y deja la base vacía sin tocar el
+#                       árbol —que es lo que pide un consumidor como el db_fresh de okoworktree—.
 #                       OJO A LO QUE NO ES: no deja la base vacía al terminar. Sólo cambia el paso
 #                       3; el resto de la provisión —config, enlaces, activación y warm-up— se
 #                       ejecuta igual, así que la base acaba CON SU ESQUEMA y con la pizarra
@@ -280,8 +286,14 @@ fi
 # cuenta filas sin filtrar — o sea, cuando ya ha dado una respuesta equivocada.
 #
 # El teardown NO era el sitio: ya tira la base POR DEFECTO (`DROP DATABASE IF EXISTS`, y su
-# cabecera lo declara). Lo que faltaba es la mitad barata —refrescar los DATOS conservando los
-# FICHEROS—, y ésa es del provisionador porque es él quien reconstruye el esquema justo después.
+# cabecera lo declara). Lo que faltaba es refrescar los DATOS conservando los FICHEROS, y eso es del
+# provisionador porque es él quien reconstruye el esquema justo después.
+#
+# OJO A LO QUE LA MEDICIÓN DESMINTIÓ: esto se pensó como «la vía barata», y no lo es. Medido, no es
+# más rápido que teardown + provisión (105,6 s frente a 99,5 s), porque el warm-up del esquema es el
+# 90 % del coste y lo pagan las dos. Así que el problema de la base sucia NO era que no hubiera
+# forma de limpiarla —teardown + provisión ya la limpiaba, y cuesta lo mismo—: era que nadie sabía
+# que limpiar costaba minuto y medio. Lo que esto aporta es atomicidad y no tocar el árbol.
 #
 # ## LA COLACIÓN ES LA MISMA A PROPÓSITO
 #

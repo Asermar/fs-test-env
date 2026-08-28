@@ -100,7 +100,14 @@ otra ruta, define **`TESTENV_COMPOSE_FILE`** (absoluta o relativa a la raíz) en
 
 ## Configuración
 
-Prioridad de lectura: **variables de entorno** → `<proyecto>/.fs-test-env.env` → **defaults**.
+Prioridad de lectura: `<proyecto>/.fs-test-env.env` → **variables de entorno** → **defaults**.
+
+**Y el orden importa más de lo que parece: el fichero PISA el entorno.** Los scripts lo sourcean
+*después* de leer las variables y sus asignaciones son incondicionales (`TEST_DB="…"`, no
+`TEST_DB="${TEST_DB:-…}"`), así que `TEST_DB=otra bin/test-env-provision.sh` **no cambia la base** si
+el fichero la declara — el provisionador imprime en su cabecera la que usa de verdad, y ahí se ve.
+Para cambiar un valor que el fichero fija, se edita el fichero. Las variables de entorno sólo ganan
+sobre lo que el fichero **no** declara.
 Variables principales (ver `config.env.example`): `FS_CORE_DIR` (layout del core: `src` o `.`),
 `TESTENV_REPO_PATH` (ruta absoluta idéntica host/contenedor), `TEST_DB`, `CORE_REPO`/`CORE_BRANCH`,
 `FS_LANG`/`FS_TIMEZONE`, `TEST_WEB_TITLE`, y las de contenedor/red/proxy (`TESTENV_*`).
@@ -122,8 +129,20 @@ $FS_TEST/bin/test-env-provision.sh --recrear-bd
 ```
 
 Tira la BD de pruebas y la vuelve a crear vacía —`utf8mb4` / `utf8mb4_unicode_520_ci`, la misma
-colación que una base recién creada—, **conservando el clon del core y su `vendor`**, que es lo que
-cuesta minutos. Es el caso frecuente: *los ficheros están bien y los datos están sucios*.
+colación que una base recién creada—, **conservando el clon del core y su `vendor`**. Es el caso
+frecuente: *los ficheros están bien y los datos están sucios*.
+
+> **No es más rápido que la vía larga, y conviene saberlo antes de elegir.** Medido en Mesa/FS el
+> 28-ago-2026, misma copia, una pasada de cada una: `--recrear-bd` **105,6 s**; `teardown` (0,8 s) +
+> provisión completa (98,7 s) = **99,5 s**. Casi todo el coste es el **warm-up del esquema** —activar
+> los plugins e instanciar los ~290 modelos, 89 s— y **las dos vías lo pagan igual**. Lo que el
+> refresco se ahorra es sólo el clon del core (**6 s**) y el `composer install` (**3 s**, medido en
+> frío y sin caché en la máquina), que se pierden en la variación entre pasadas.
+>
+> Lo que sí aporta, y es por lo que está: es **una** orden en vez de dos, así que no hay una ventana
+> en la que el entorno no exista —si alguien hace el teardown y olvida provisionar, se queda sin
+> entorno—, y deja la base vacía **sin tocar el árbol**, que es lo que un consumidor como el
+> `db_fresh` de `okoworktree` necesita. Si el ahorro de tiempo es lo que buscas, no lo hay.
 
 **No deja la base vacía al terminar**, y eso es lo que se quiere: sólo cambia el paso de creación, y
 el resto de la provisión —config, enlaces, activación y warm-up— se ejecuta igual, así que la base
@@ -131,10 +150,10 @@ acaba **con su esquema** y con todos los plugins desactivados, indistinguible de
 
 Las dos vías, y cuál es cada una:
 
-| lo que está mal | qué hace falta | orden |
-|---|---|---|
-| los **datos** están sucios | rehacer la base; los ficheros valen | `test-env-provision.sh --recrear-bd` |
-| el **core o el `vendor`** están mal o desfasados | rehacer los ficheros; la base también | `test-env-teardown.sh` y después `test-env-provision.sh` |
+| lo que está mal | qué hace falta | orden | medido |
+|---|---|---|---|
+| los **datos** están sucios | rehacer la base; los ficheros valen | `test-env-provision.sh --recrear-bd` | 105,6 s |
+| el **core o el `vendor`** están mal o desfasados | rehacer los ficheros; la base también | `test-env-teardown.sh` y después `test-env-provision.sh` | 99,5 s |
 
 Dos guardas que conviene conocer antes de usarlo:
 
