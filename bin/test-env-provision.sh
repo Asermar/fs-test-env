@@ -321,6 +321,18 @@ fi
 # sería pasarla por stdin, y si algún día esto crece a algo con más de un usuario real, ése es el
 # siguiente paso. Los otros argumentos (host, puerto, usuario, base) no son secretos y se quedan.
 FS_TEST_DB_PASS="$DB_PASS" php -r '
+// SIN ESTO, LAS COMPROBACIONES DE ABAJO SON CÓDIGO MUERTO. Desde PHP 8.1 mysqli va en modo
+// estricto por defecto (MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT), así que `query()` no devuelve
+// false al fallar: LANZA mysqli_sql_exception. Medido contra un MariaDB desechable con un usuario
+// sin privilegio DROP: sin esta línea el script moría con un «PHP Fatal error: Uncaught
+// mysqli_sql_exception» y un stack trace, y ninguno de los mensajes de abajo llegaba a emitirse.
+//
+// Fallar así no era lo peligroso —abortaba, no reportaba éxito— pero sí lo inútil: quien lo viera
+// tendría un volcado de PHP en vez de qué pasó y qué hacer. Y peor, el código de al lado prometía
+// un mensaje que no salía nunca. Con el reporte apagado, `query()` vuelve a devolver false y las
+// comprobaciones son las que hablan. (Vale también para el `connect_errno` de la línea siguiente,
+// que por lo mismo tampoco se alcanzaba.)
+mysqli_report(MYSQLI_REPORT_OFF);
 $m = new mysqli($argv[1], $argv[3], (string) getenv("FS_TEST_DB_PASS"), "", (int)$argv[2]);
 if ($m->connect_errno) { fwrite(STDERR, "conexion: ".$m->connect_error."\n"); exit(1); }
 $db = $m->real_escape_string($argv[5]);
