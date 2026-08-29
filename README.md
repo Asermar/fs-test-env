@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.1.0-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.2.0-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -374,6 +374,35 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.2.0 — Refrescar la base de pruebas, y un flag que se retira
+
+- **`--recrear-bd` en el provisionador**: tira la BD de pruebas y la vuelve a crear vacía, con la
+  misma colación (`utf8mb4` / `utf8mb4_unicode_520_ci`) para que una base refrescada y una recién
+  creada no difieran en nada. Conserva el clon del core y su `vendor`, y el esquema se rehace
+  porque el resto de la provisión sigue su curso. **NO es más rápido** que `teardown` + provisión
+  —**105,6 s frente a 99,5 s**, medido— porque el warm-up del esquema es el 90 % del coste y lo
+  pagan las dos vías igual. Lo que aporta es **atomicidad** —una orden en vez de dos, sin ventana
+  en la que el entorno no exista si alguien hace el teardown y olvida provisionar— y dejar la base
+  vacía **sin tocar el árbol**, que es lo que pide el `db_fresh` de `okoworktree`.
+- **Comprueba el efecto, no la etiqueta**: mira el retorno del `DROP` y del `CREATE` —que se
+  ignoraban— y pregunta por consulta que la base quedó a 0 tablas. Se apaga además el reporte
+  estricto de `mysqli`, sin lo cual esas comprobaciones eran **código muerto**: `query()` lanza
+  excepción en vez de devolver `false`.
+- **`--keep-db` se retira del teardown, y pasarlo FALLA con rc 2 sin tocar nada.** Ignorar un flag
+  desconocido tiraría la base justo cuando quien invoca pedía conservarla —el daño exacto que el
+  flag existía para evitar—, y quien lo tuviera escrito en un guion no se enteraría nunca. Por lo
+  mismo, los dos scripts **rechazan lo que no reconocen**: un `--recrear-bd` mal escrito habría
+  provisionado sin refrescar y habría salido 0.
+- **El teardown documentado no llegaba a borrar la base**: derivaba la raíz del proyecto de su
+  propia ubicación y, desde la mudanza, resolvía a `~/Dev/Tooling`. Ahora sale del directorio
+  actual.
+- **`bin/version.sh` dictaba un `git -C test-bin fetch` roto desde la 3.0.0** (rc 128); el que
+  emite ahora sale 0. El README y el manual seguían enseñando a montarlo como submódulo `test-bin/`.
+- **El README corrige la precedencia que declaraba**: el `.fs-test-env.env` **pisa** las variables
+  de entorno, no al revés. De ahí que una orden con `TEST_DB=...` por delante no surta efecto.
+- **Tercera batería**: `test/teardown.sh` (15 comprobaciones, con control positivo) y
+  `test/provision.sh` pasa de 12 a 19 — **56 en total**.
 
 ### 3.1.0 — La configuración del entorno de test sale del repo del cliente
 
