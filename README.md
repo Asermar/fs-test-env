@@ -45,7 +45,8 @@ la interfaz incluidos), no requiere servidor.
   corriendo no hace nada; si está parado o no existe, lo levanta con el compose del proyecto
   (`<engine>-compose up -d <servicio>`), y el arranque provisiona/actualiza el entorno.
   No interactivo (pensado para un botón, p.ej. la sección Scripts de OkoGit). Se **niega en el
-  checkout principal** salvo con `--en-el-principal`.
+  checkout principal** salvo con `--en-el-principal`, y **comprueba que el contenedor quedó
+  corriendo** antes de decir que lo levantó.
 - `bin/lib/ancla.sh` — la guarda del checkout principal: la señal, el mensaje que ofrece la salida y
   el porqué, en un solo sitio para los tres scripts que pueden montar el entorno.
 - `bin/plugin-topo-order.php` — ordena plugins por sus dependencias `require`.
@@ -150,6 +151,25 @@ rechazar sin que nadie lo notara.
 La señal es de git —`--absolute-git-dir` frente a `--git-common-dir`— y no el nombre de la carpeta ni
 el tipo de `.git`: en un **submódulo** el `.git` también es un fichero, así que con esa señal cada
 plugin de un superproyecto pasaría por copia. Vive en `bin/lib/ancla.sh`, una sola vez para los tres.
+
+### Lo que la guarda NO alcanza, dicho para que no se descubra
+
+Un caso real de esta semana llegó al principal de Mesa/FS por **tres síntomas**, y ninguno decía por
+qué ni adónde ir: el `.fs-test-env.env` inexistente, el `test-bin` ausente y sin declarar en
+`.gitmodules`, y **el runner respondiendo 403**. Contra los scripts del arnés, los tres están
+cubiertos: cualquiera de los tres —`init-project.sh`, `up.sh`, `test-env-provision.sh`— cita la
+entrada del registro y ofrece el `okoworktree add`.
+
+Pero **el 403 no es una de esas puertas**: lo ve quien abre el navegador sin haber invocado ningún
+script, y ahí el arnés no está en el camino — lo contesta apache, o traefik, antes de llegar a su
+PHP. Lo que sí se hace es **quitarle la causa**, que es una cadena que se ve desde tres sitios y que
+ninguno nombraba: falta el `.fs-test-env.env` → falta el `test.conf` renderizado → el motor de
+contenedores, al montar un bind sobre un fichero que no existe, **crea un directorio con ese
+nombre** → el vhost no carga → apache cae a su sitio por defecto → **403**. `init-project.sh` ahora
+se niega al encontrar ese directorio y dice cómo deshacerlo.
+
+Y el `test-bin` ausente tampoco es del arnés: lo ve quien mira el repo del cliente, no quien invoca
+una herramienta. Su sitio es el `CLAUDE.md` de ese repo y el mensaje del propio git.
 
 ## Refrescar la BD de pruebas
 
@@ -258,6 +278,15 @@ rota — está diciendo que ese flag no significa lo que crees.
 configuración de producto de su ancla, que una instalación nueva de verdad sigue preguntando, que una
 copia sin ancla falla en vez de registrarse, y que las guardas de la base de test siguen viendo a las
 copias. **22 comprobaciones, en torno a un segundo.**
+
+> **En una copia de trabajo, el compose base levanta el contenedor del ORIGINAL.** El compose declara
+> los `container_name` sin sufijo y quien se lo pone a una copia es el overlay que genera
+> `okoworktree`, que `up.sh` no tiene. Medido en `Mesa/FS-wt-guardaancla`: la invocación devolvía 0,
+> el contenedor de la copia seguía `Exited` sin una línea de log nueva, **y aparecía un `mesa-fs-test`
+> recién creado** —el nombre del original— montando el árbol de la copia y ocupando su router de
+> traefik. Así que `up.sh` **arranca con el motor** el contenedor que la copia declara, **delega en
+> `okoworktree up <nombre>`** cuando no existe, y **comprueba el estado final** antes de decir que lo
+> levantó: antes afirmaba «levantado» y salía 0 con el contenedor parado.
 
 **`test/provision.sh`** — comprueba la **guarda del ancla en los tres scripts que pueden montar el
 entorno** (`test-env-provision.sh`, `init-project.sh` y `up.sh`): que en el checkout principal se

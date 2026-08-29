@@ -64,6 +64,18 @@ ancla_es_principal() {
     [ -n "$dir" ] && [ "$dir" = "$comun" ]
 }
 
+# ancla_es_worktree <raíz> → 0 si esa raíz es un WORKTREE (no el principal, y no un no-repo).
+#
+# No es la negación de `ancla_es_principal`: ésa devuelve 1 también cuando no hay repo, y los dos
+# casos piden cosas distintas. Un worktree tiene su stack levantado por `okoworktree` con un overlay
+# que renombra los contenedores; un directorio suelto no tiene nada de eso.
+ancla_es_worktree() {
+    local raiz="${1:?falta la raíz del proyecto}" dir comun
+    dir="$(git -C "$raiz" rev-parse --absolute-git-dir 2>/dev/null || true)"
+    comun="$(git -C "$raiz" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+    [ -n "$dir" ] && [ -n "$comun" ] && [ "$dir" != "$comun" ]
+}
+
 # ancla_frase <id> → la descripción del bloque del registro, o vacío si no lo hay.
 #
 # Es la frase que se cita al rechazar. Vive en el registro y no aquí a propósito: lo que un ancla ES

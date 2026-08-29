@@ -36,6 +36,15 @@
 #
 # **AUTOCONTENIDA**: monta sus repos de pega en un temporal y lo borra al salir.
 # Sin contenedores, sin base de datos y sin red.
+#
+# ## LO QUE NO CUBRE, Y HAY QUE VERIFICAR A MANO
+#
+# De `up.sh` se comprueba aquí la guarda, la raíz y el mensaje; NO que arranque
+# de verdad ni que su postcondición cace un arranque fallido, porque las dos
+# cosas exigen un motor de contenedores. Se verifican contra una copia real —
+# medido el 29-ago-2026: con el contenedor parado lo deja «running», y contra un
+# contenedor que muere al arrancar sale rc 1 diciendo el estado. «Todo en verde»
+# aquí no acredita que `up.sh` levante nada.
 # =============================================================================
 set -uo pipefail
 
@@ -154,6 +163,16 @@ grep -qF 'no se encuentra el fichero compose' <<<"$SAL" && ok "…y sigue hasta 
     || mal "no llegó a buscar el compose: no prueba que pasara la guarda"
 grep -qF "Raíz en la que he buscado: $BASE/copia" <<<"$SAL" && ok "…diciendo la RAÍZ en la que buscó" \
     || mal "no dice la raíz: un fallo de derivación se leería como falta de configuración"
+
+printf '\n\033[1;36m— up.sh en una COPIA no crea el contenedor del ORIGINAL —\033[0m\n'
+# El compose declara los container_name SIN sufijo: crearlo desde aquí levantaría el del original
+# montando el árbol de la copia. Pasó, y dejó un huérfano ocupando el router del entorno principal.
+mkdir -p "$BASE/copia/podman" && printf 'services:\n  t:\n    container_name: pega-test\n' > "$BASE/copia/podman/podman-compose.yaml"
+SAL="$(TESTENV_CONTAINER=zz-no-existe-jamas corre_up "$BASE/copia")"; RC=$?
+[ "$RC" -ne 0 ] && ok "no lo crea: falla (rc $RC)" || mal "crea el contenedor del original desde una copia"
+grep -qF 'okoworktree up' <<<"$SAL" && ok "…y delega en quien sabe del overlay" || mal "no dice quién sí puede"
+grep -qF 'del ORIGINAL' <<<"$SAL" && ok "…explicando por qué no lo hace él" || mal "no explica el riesgo"
+rm -rf "$BASE/copia/podman"
 
 printf '\n\033[1;36m— el PARSEO: --recrear-bd se acepta, lo desconocido se RECHAZA —\033[0m\n'
 # Que `--recrear-bd` se acepta se comprueba por lo que ocurre DESPUÉS, igual que arriba con la

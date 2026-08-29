@@ -144,6 +144,37 @@ FIN
     exit 1
 fi
 
+# --- UN DIRECTORIO DONDE VA UN FICHERO: SE DICE, NO SE MUERE CON UN ERROR DE REDIRECCIÓN ---------
+#
+# Si el proyecto se levantó sin haber generado antes estas piezas, podman monta un bind sobre un
+# fichero que no existe y **crea un DIRECTORIO con ese nombre**. A partir de ahí este generador moría
+# con «.fs-test-env/test.conf: Is a directory» —un error de bash, no un diagnóstico— y el entorno
+# quedaba con el sitio de apache montado como directorio, que es lo que acaba sirviendo un **403** en
+# el runner: el vhost no carga y apache cae a su sitio por defecto.
+#
+# Es la última pieza de una cadena que se ve desde tres sitios distintos y ninguno la nombraba: falta
+# el .fs-test-env.env → falta el test.conf renderizado → podman crea un directorio → 403.
+_esc=""; [ "$PERMITIR_PRINCIPAL" = 1 ] && _esc=" --en-el-principal"
+for _pieza in test.conf service.yaml; do
+    if [ -d "$OUT_DIR/$_pieza" ]; then
+        cat >&2 <<FIN
+ERROR: «$OUT_DIR/$_pieza» es un DIRECTORIO, y ahí tiene que ir un fichero.
+
+  No lo has creado tú: lo crea el motor de contenedores al montar un bind sobre un fichero que aún
+  no existía, y pasa cuando el stack se levanta ANTES de generar esta configuración.
+
+  Mientras siga siendo un directorio, el sitio de apache del runner no carga y la web contesta un
+  403 que no dice nada de esto.
+
+  Arreglo, con el stack de este proyecto abajo para que no lo vuelva a crear:
+
+      rmdir "$OUT_DIR/$_pieza"
+      $0$_esc
+FIN
+        exit 1
+    fi
+done
+
 # valores previos (si ya existe el generado) como defaults
 # shellcheck disable=SC1090
 [ -f "$ENV_FILE" ] && . "$ENV_FILE"

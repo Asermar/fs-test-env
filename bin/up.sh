@@ -4,7 +4,9 @@
 #
 #   - Si el contenedor YA está corriendo: no toca nada (la provisión del entorno
 #     ocurre al arrancar el contenedor, TESTENV_AUTO_PROVISION=1).
-#   - Si está parado o no existe: lo levanta con el compose del proyecto
+#   - Si está PARADO: lo arranca con el motor. `<engine>-compose up -d` NO sirve para esto —
+#     medido abajo—, y este script prometía en esta misma línea algo que no hacía.
+#   - Si NO EXISTE: lo crea con el compose del proyecto
 #     (<engine>-compose up -d <servicio>). Al arrancar, el contenedor ejecuta
 #     test-env-provision.sh, que CREA el entorno de pruebas si falta y lo
 #     ACTUALIZA si ya existe (clona/pull del core, composer, BD, plugins, warm-up).
@@ -163,8 +165,61 @@ if [ "$status" = "running" ]; then
     exit 0
 fi
 
-echo ">> Levantando '$TESTENV_SERVICE' con: ${COMPOSE[*]} -f $COMPOSE_FILE up -d"
-echo "   (estado previo del contenedor: $status)"
-( cd "$(dirname "$COMPOSE_FILE")" && "${COMPOSE[@]}" -f "$COMPOSE_FILE" up -d "$TESTENV_SERVICE" )
+# CÓMO SE LEVANTA, Y POR QUÉ NO ES SIEMPRE EL COMPOSE.
+#
+# ## Un contenedor que YA EXISTE se arranca con el motor
+#
+# `<engine>-compose up -d <servicio>` sobre el compose base de un worktree NO arranca el contenedor
+# de la copia: crea (o arranca) el del ORIGINAL. El compose declara `container_name` sin sufijo, y
+# quien le pone el sufijo a una copia es el overlay que genera `okoworktree`, que este script no
+# tiene. Medido el 29-ago-2026 en `Mesa/FS-wt-guardaancla`: la invocación devolvía 0, el contenedor
+# de la copia seguía `Exited` sin una línea de log nueva… y aparecía un `mesa-fs-test` recién creado
+# —el nombre del original— montando el árbol de la copia y ocupando su router de traefik.
+#
+# O sea: no es que el compose «no arranque nada». Arranca **otra cosa**, y eso es peor, porque el
+# contenedor del principal es justo el que la decisión del 27-ago dice que no debe existir.
+#
+# `<engine> start` sobre el contenedor que la copia declara sí lo deja «Up» al instante.
+#
+# ## Y si NO existe, en una copia se DELEGA
+#
+# Crear el stack de una copia es de `okoworktree`, que sabe del overlay; hacerlo desde aquí con el
+# compose base es exactamente cómo se creó ese huérfano. Así que se dice y se para.
+if [ "$status" != "absent" ]; then
+    echo ">> Arrancando '$TESTENV_CONTAINER' (estado previo: $status) con $CONTAINER_ENGINE start"
+    "$CONTAINER_ENGINE" start "$TESTENV_CONTAINER" >/dev/null
+elif ancla_es_worktree "$FS_PROJECT_ROOT"; then
+    _copia="$(basename "$FS_PROJECT_ROOT")"; _copia="${_copia##*-wt-}"
+    cat >&2 <<FIN
+ERROR: '$TESTENV_CONTAINER' no existe, y esto es una COPIA de trabajo.
 
-echo "✓ '$TESTENV_CONTAINER' levantado. El arranque provisiona/actualiza el entorno de pruebas."
+  No lo creo yo: el compose del proyecto nombra los contenedores SIN el sufijo de la copia —quien se
+  lo pone es el overlay que genera okoworktree—, así que crearlo desde aquí levantaría el contenedor
+  del ORIGINAL montando el árbol de esta copia. Eso ya ocurrió una vez y dejó un huérfano ocupando
+  el router de traefik del entorno principal.
+
+  El stack de una copia lo levanta quien sabe de su overlay:
+
+      okoworktree up $_copia
+
+  Eso deja el contenedor con su nombre y su router. Después, este script ya puede arrancarlo.
+FIN
+    exit 1
+else
+    echo ">> Creando '$TESTENV_SERVICE' con: ${COMPOSE[*]} -f $COMPOSE_FILE up -d"
+    ( cd "$(dirname "$COMPOSE_FILE")" && "${COMPOSE[@]}" -f "$COMPOSE_FILE" up -d "$TESTENV_SERVICE" )
+fi
+
+# SE COMPRUEBA EL EFECTO, NO QUE EL COMANDO VOLVIERA. Antes se afirmaba «levantado» a continuación
+# del compose, sin mirar: con el fallo de arriba, este script decía que había levantado el entorno y
+# salía 0 con el contenedor parado. Un paso que no hace su trabajo tiene que decirlo.
+final="$("$CONTAINER_ENGINE" inspect -f '{{.State.Status}}' "$TESTENV_CONTAINER" 2>/dev/null || echo absent)"
+if [ "$final" != "running" ]; then
+    echo "ERROR: '$TESTENV_CONTAINER' NO está corriendo (estado: $final) pese a que el comando" >&2
+    echo "       de arranque no dio error. El entorno de pruebas no se ha levantado." >&2
+    echo "       Últimas líneas de su registro:" >&2
+    "$CONTAINER_ENGINE" logs --tail 15 "$TESTENV_CONTAINER" 2>&1 | sed 's/^/         /' >&2 || true
+    exit 1
+fi
+
+echo "✓ '$TESTENV_CONTAINER' levantado (comprobado: $final). El arranque provisiona/actualiza el entorno."
