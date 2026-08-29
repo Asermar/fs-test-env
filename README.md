@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.3.0-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.3.1-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -279,6 +279,14 @@ configuración de producto de su ancla, que una instalación nueva de verdad sig
 copia sin ancla falla en vez de registrarse, y que las guardas de la base de test siguen viendo a las
 copias. **22 comprobaciones, en torno a un segundo.**
 
+> **Y antes de tocar nada se pregunta DE QUIÉN es el contenedor, no sólo dónde estamos.** Saber que
+> estás en una copia dice dónde estás, no a quién pertenece lo que vas a arrancar: si el
+> `TESTENV_CONTAINER` no lleva el sufijo de la copia, `up.sh` se niega — lo arranque o lo dé por
+> bueno—, con el mismo criterio que `okoworktree` aplica ya a la base de datos («no lleva su sufijo:
+> no puedo garantizar que sea suya»). No es un caso rebuscado: al configurar una copia,
+> `TESTENV_CONTAINER` **se deriva del compose, que nombra los contenedores sin sufijo**, así que una
+> copia nace declarando el del original.
+
 > **En una copia de trabajo, el compose base levanta el contenedor del ORIGINAL.** El compose declara
 > los `container_name` sin sufijo y quien se lo pone a una copia es el overlay que genera
 > `okoworktree`, que `up.sh` no tiene. Medido en `Mesa/FS-wt-guardaancla`: la invocación devolvía 0,
@@ -439,6 +447,33 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.3.1 — La guarda pregunta de quién es el contenedor, no sólo dónde estoy
+
+- **3.3.1** — La 3.3.0 cerraba la **creación** del contenedor del original desde una copia, pero no su
+  **arranque**: `ancla_es_worktree` aparecía una sola vez y sólo en la rama de «no existe». Con un
+  `TESTENV_CONTAINER` que apunta al original —que es lo que genera hoy `init-project.sh` en una copia—
+  `up.sh` lo arrancaba; y si estaba corriendo salía con **0** diciendo «nada que hacer», **antes** de
+  la rama de arranque, o sea sin dejar rastro. Ahora la comprobación va **delante del estado** y cubre
+  las tres ramas.
+- **3.3.1** — **Se niega por defecto, no por certeza**: no hay que demostrar que el contenedor es
+  ajeno, sino que no se puede demostrar que sea **propio**. Sobre algo que arranca el servicio de otro,
+  ésa es la dirección segura.
+- **3.3.1** — El criterio **está copiado, no inventado**: es el de `_fs_testenv_guarda` de
+  `okoworktree`, que ya decide así sobre la **base de datos** de una copia —«no lleva su sufijo: no
+  puedo garantizar que sea suya»—, con sus mismos tres casos y su misma frase, para que quien lea una
+  entienda la otra.
+- **3.3.1** — El mensaje **dice de dónde sale el nombre** —`TESTENV_CONTAINER` se deriva del compose,
+  que nombra sin sufijo— y ofrece `okoworktree up <copia>`, para que quien lo lea entienda que no es
+  culpa suya.
+- **3.3.1** — Y una aserción de la batería que pasaba **por el motivo equivocado**: al mutar la guarda
+  sólo caía una de tres, porque en la fixture el contenedor tampoco existe y la rama de «no existe»
+  daba el mismo `rc 1` y el mismo mensaje. Un «se rechaza» a secas habría salido verde con la guarda
+  anulada. Ahora la aserción discrimina el **motivo**.
+
+> **Esto es una red, no la solución.** Mientras `TESTENV_CONTAINER` siga naciendo en una copia con el
+> nombre del original, la copia declara algo que no es suyo y esta guarda la frena. La causa —las
+> claves derivadas que se quedan con la identidad del original— tiene dueño aparte.
 
 ### 3.3.0 — La guarda del checkout principal, en las tres puertas
 

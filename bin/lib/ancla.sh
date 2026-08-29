@@ -76,6 +76,40 @@ ancla_es_worktree() {
     [ -n "$dir" ] && [ -n "$comun" ] && [ "$dir" != "$comun" ]
 }
 
+# ancla_sufijo_copia <raíz> → el sufijo de una copia (`…-wt-<sufijo>`), o vacío si no lo tiene.
+ancla_sufijo_copia() {
+    local nombre; nombre="$(basename "${1:?falta la raíz}")"
+    case "$nombre" in *-wt-*) printf '%s\n' "${nombre##*-wt-}" ;; *) printf '%s\n' "$nombre" ;; esac
+}
+
+# ancla_contenedor_es_suyo <raíz> <nombre del contenedor> → 0 si ese contenedor es de esta copia.
+#
+# ## LA PREGUNTA ES DE QUIÉN ES EL CONTENEDOR, NO DÓNDE ESTOY
+#
+# Saber que estoy en una copia no basta para tocar un contenedor: dice dónde estoy, no a quién
+# pertenece lo que voy a arrancar. Es la distinción que faltaba, y por eso la v3.3.0 cerró la
+# CREACIÓN del contenedor del original desde una copia pero no su ARRANQUE — un `start` sobre un
+# contenedor que ya existía, o un «ya está levantado» sobre uno corriendo, pasaban sin mirar el
+# nombre.
+#
+# EL CRITERIO ESTÁ COPIADO, no inventado: es el de `_fs_testenv_guarda` de
+# `Scripts/lib/okoworktree/kinds/facturascripts.sh`, que ya decide así sobre la base de datos de una
+# copia — «no lleva su sufijo: no puedo garantizar que sea suya»—. Mismo razonamiento y mismos tres
+# casos: vacío pasa (no hay nada que garantizar), con el sufijo pasa, y lo demás se niega.
+#
+# Y se niega por DEFECTO, no por certeza: no se trata de demostrar que el contenedor es ajeno, sino
+# de que no se puede demostrar que sea propio. Sobre algo que arranca un servicio de otro, esa es la
+# dirección segura.
+ancla_contenedor_es_suyo() {
+    local raiz="${1:?falta la raíz}" nombre="${2:-}" sufijo
+    # Fuera de una copia no hay sufijo que exigir: el contenedor con el nombre del proyecto es
+    # justamente el suyo.
+    ancla_es_worktree "$raiz" || return 0
+    [ -n "$nombre" ] || return 0
+    sufijo="$(ancla_sufijo_copia "$raiz")"
+    case "$nombre" in *"$sufijo"*) return 0 ;; *) return 1 ;; esac
+}
+
 # ancla_frase <id> → la descripción del bloque del registro, o vacío si no lo hay.
 #
 # Es la frase que se cita al rechazar. Vive en el registro y no aquí a propósito: lo que un ancla ES
