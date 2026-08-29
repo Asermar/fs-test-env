@@ -40,8 +40,10 @@
 # ## LO QUE NO CUBRE, Y HAY QUE VERIFICAR A MANO
 #
 # De `up.sh` se comprueba aquí la guarda, la raíz y el mensaje; NO que arranque
-# de verdad ni que su postcondición cace un arranque fallido, porque las dos
-# cosas exigen un motor de contenedores. Se verifican contra una copia real —
+# de verdad, ni que su postcondición cace un arranque fallido, ni que un
+# contenedor ajeno que EXISTE quede sin tocar — las tres cosas exigen un motor de
+# contenedores. La de la propiedad se ejerce igual porque va antes de mirar el
+# estado, pero eso comprueba el rechazo, no que no lo arranque. Se verifican contra una copia real —
 # medido el 29-ago-2026: con el contenedor parado lo deja «running», y contra un
 # contenedor que muere al arrancar sale rc 1 diciendo el estado. «Todo en verde»
 # aquí no acredita que `up.sh` levante nada.
@@ -164,11 +166,38 @@ grep -qF 'no se encuentra el fichero compose' <<<"$SAL" && ok "…y sigue hasta 
 grep -qF "Raíz en la que he buscado: $BASE/copia" <<<"$SAL" && ok "…diciendo la RAÍZ en la que buscó" \
     || mal "no dice la raíz: un fallo de derivación se leería como falta de configuración"
 
+printf '\n\033[1;36m— up.sh pregunta DE QUIÉN es el contenedor, no sólo dónde está —\033[0m\n'
+# La copia se llama `copia`, así que su sufijo es «copia»: un contenedor que no lo lleve es de otro.
+# Esto se ejerce SIN motor porque la guarda va ANTES de mirar el estado; que además no toque un
+# contenedor que existe se verifica a mano (ver la cabecera).
+mkdir -p "$BASE/copia/podman" && printf 'services:\n  t:\n    container_name: zz-ajeno\n' > "$BASE/copia/podman/podman-compose.yaml"
+# LA ASERCIÓN TIENE QUE DISCRIMINAR POR QUÉ SE RECHAZA, no sólo que se rechace: en esta fixture el
+# contenedor tampoco existe, así que un `rc != 0` a secas se cumple igual por la OTRA rama —la de
+# «no existe»— y saldría verde con esta guarda anulada. Se comprueba el motivo.
+SAL="$(TESTENV_CONTAINER=zz-ajeno-de-otro corre_up "$BASE/copia")"; RC=$?
+{ [ "$RC" -ne 0 ] && grep -qF 'no lleva el sufijo de esta copia' <<<"$SAL"; } \
+    && ok "un contenedor sin el sufijo de la copia se rechaza POR SERLO (rc $RC)" \
+    || mal "no se rechaza por propiedad (rc $RC): un rc a secas lo daría también la rama de «no existe»"
+grep -qF 'garantizar que' <<<"$SAL" && ok "…y lo dice como la guarda de la BD: no puede garantizar que sea suyo" \
+    || mal "no explica el motivo"
+grep -qF 'okoworktree up' <<<"$SAL" && ok "…y ofrece la salida" || mal "no da salida"
+# EL CASO BUENO, que es lo que esta guarda no puede romper: con el sufijo, pasa de largo y sigue.
+SAL="$(TESTENV_CONTAINER=zz-copia-test corre_up "$BASE/copia")"
+grep -qF 'no lleva el sufijo' <<<"$SAL" && mal "rechaza el contenedor propio de la copia" \
+    || ok "y el contenedor propio (lleva «copia») pasa"
+# Y el negativo del negativo: fuera de una copia no se exige sufijo ninguno.
+SAL="$(TESTENV_CONTAINER=loquesea corre_up "$BASE/principal" --en-el-principal)"
+grep -qF 'no lleva el sufijo' <<<"$SAL" && mal "exige sufijo fuera de una copia" \
+    || ok "…y fuera de una copia no se exige sufijo"
+rm -rf "$BASE/copia/podman"
+
 printf '\n\033[1;36m— up.sh en una COPIA no crea el contenedor del ORIGINAL —\033[0m\n'
 # El compose declara los container_name SIN sufijo: crearlo desde aquí levantaría el del original
 # montando el árbol de la copia. Pasó, y dejó un huérfano ocupando el router del entorno principal.
 mkdir -p "$BASE/copia/podman" && printf 'services:\n  t:\n    container_name: pega-test\n' > "$BASE/copia/podman/podman-compose.yaml"
-SAL="$(TESTENV_CONTAINER=zz-no-existe-jamas corre_up "$BASE/copia")"; RC=$?
+# El nombre LLEVA el sufijo de la copia a propósito: si no, saltaría antes la guarda de propiedad y
+# esta rama —«es tuyo, pero no existe»— no se ejercería nunca.
+SAL="$(TESTENV_CONTAINER=zz-copia-no-existe-jamas corre_up "$BASE/copia")"; RC=$?
 [ "$RC" -ne 0 ] && ok "no lo crea: falla (rc $RC)" || mal "crea el contenedor del original desde una copia"
 grep -qF 'okoworktree up' <<<"$SAL" && ok "…y delega en quien sabe del overlay" || mal "no dice quién sí puede"
 grep -qF 'del ORIGINAL' <<<"$SAL" && ok "…explicando por qué no lo hace él" || mal "no explica el riesgo"
