@@ -279,6 +279,14 @@ configuración de producto de su ancla, que una instalación nueva de verdad sig
 copia sin ancla falla en vez de registrarse, y que las guardas de la base de test siguen viendo a las
 copias. **22 comprobaciones, en torno a un segundo.**
 
+> **Y antes de tocar nada se pregunta DE QUIÉN es el contenedor, no sólo dónde estamos.** Saber que
+> estás en una copia dice dónde estás, no a quién pertenece lo que vas a arrancar: si el
+> `TESTENV_CONTAINER` no lleva el sufijo de la copia, `up.sh` se niega — lo arranque o lo dé por
+> bueno—, con el mismo criterio que `okoworktree` aplica ya a la base de datos («no lleva su sufijo:
+> no puedo garantizar que sea suya»). No es un caso rebuscado: al configurar una copia,
+> `TESTENV_CONTAINER` **se deriva del compose, que nombra los contenedores sin sufijo**, así que una
+> copia nace declarando el del original.
+
 > **En una copia de trabajo, el compose base levanta el contenedor del ORIGINAL.** El compose declara
 > los `container_name` sin sufijo y quien se lo pone a una copia es el overlay que genera
 > `okoworktree`, que `up.sh` no tiene. Medido en `Mesa/FS-wt-guardaancla`: la invocación devolvía 0,

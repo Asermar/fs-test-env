@@ -160,6 +160,47 @@ echo
 
 # --- estado del contenedor ---
 status="$("$CONTAINER_ENGINE" inspect -f '{{.State.Status}}' "$TESTENV_CONTAINER" 2>/dev/null || echo absent)"
+
+# --- ¿Y DE QUIÉN ES ESTE CONTENEDOR? -----------------------------------------------------------
+#
+# Va ANTES de mirar el estado, y ahí está lo que faltaba: hasta la v3.3.0 la única comprobación de
+# propiedad estaba en la rama de «no existe», así que un contenedor que YA existía se arrancaba —o
+# se daba por bueno si corría— sin preguntar de quién era. La v3.3.0 cerró la CREACIÓN del
+# contenedor del original desde una copia, pero no su ARRANQUE.
+#
+# NO ES UN CASO REBUSCADO, es el normal: `init-project.sh` en una copia deriva hoy `TESTENV_CONTAINER`
+# del compose del proyecto, que lo nombra sin sufijo, así que una copia nace declarando el contenedor
+# del ORIGINAL —medido: `mesa-fs-test` en una copia llamada `excursiones`—. Que no muerda ahora mismo
+# es casualidad y no cobertura: ese contenedor no existe en esta máquina, así que cae en la rama de
+# «no existe». El día que exista, se arranca.
+#
+# Y las dos ramas fallaban distinto de mal: con el contenedor PARADO lo arrancaba, y con el
+# contenedor CORRIENDO salía 0 diciendo «nada que hacer» — sin una línea que dijera que el entorno
+# que da por bueno es el de otro.
+if ! ancla_contenedor_es_suyo "$FS_PROJECT_ROOT" "$TESTENV_CONTAINER"; then
+    _copia="$(ancla_sufijo_copia "$FS_PROJECT_ROOT")"
+    cat >&2 <<FIN
+ERROR: '$TESTENV_CONTAINER' no lleva el sufijo de esta copia ('$_copia'): no puedo garantizar que
+  sea suyo, así que no lo toco. Estado actual: $status.
+
+  Esto es una COPIA de trabajo, y su entorno de test tiene que ser SUYO. Un contenedor con el
+  nombre del original monta el árbol de otro y ocupa su router de traefik: arrancarlo desde aquí
+  —o darlo por bueno si ya corre— es servir el entorno del principal creyendo que es el de esta
+  copia, y dejar sus tests a merced de lo que pase aquí.
+
+  De dónde sale ese nombre: al configurar una copia, TESTENV_CONTAINER se deriva del compose del
+  proyecto, que nombra los contenedores SIN sufijo. Quien se lo pone es el overlay que genera
+  okoworktree, no este script.
+
+  El stack de esta copia lo levanta quien sabe de su overlay:
+
+      okoworktree up $_copia
+
+  Si de verdad querías actuar sobre '$TESTENV_CONTAINER', hazlo desde el árbol al que pertenece.
+FIN
+    exit 1
+fi
+
 if [ "$status" = "running" ]; then
     echo "✓ '$TESTENV_CONTAINER' ya está levantado. Nada que hacer."
     exit 0
