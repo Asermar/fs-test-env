@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.2.0-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.3.0-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -439,6 +439,40 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.3.0 — La guarda del checkout principal, en las tres puertas
+
+- **3.3.0** — La decisión del 27-ago —«el checkout principal NO monta entorno de test; el desarrollo
+  va en worktrees»— tenía **tres puertas en el arnés y solo una cerrada**: la guarda aparecía 10 veces
+  en `test-env-provision.sh` y **cero** en `init-project.sh` y `up.sh`. Por la de `init-project.sh`
+  entró un caso real. Ahora vive **una sola vez** en `bin/lib/ancla.sh` y la usan los tres.
+- **3.3.0** — La negativa **ofrece la salida en la misma línea** —`okoworktree add <nombre>
+  --db-mode fresh`— y cita la frase del registro. Una negativa a secas deja igual de atascado a quien
+  viene de OkoFlow pidiendo tests en verde, que es lo que le pasó a quien lo sufrió.
+- **3.3.0** — `--en-el-principal` para el caso legítimo: **dar de alta el ancla sí se hace en el
+  principal**, y es el paso previo a poder abrir worktrees. El mensaje de «copia sin ancla» pasa a
+  dictar ese escape, porque el comando que dictaba antes la propia guarda lo habría hecho fallar.
+- **3.3.0** — `up.sh` **ya no puede crear el contenedor del ORIGINAL desde una copia**. El compose
+  declara los `container_name` sin sufijo y quien se lo pone es el overlay de `okoworktree`, que
+  `up.sh` no tiene: invocarlo desde una copia creaba un `mesa-fs-test` —el nombre del original—
+  montando el árbol de la copia y **ocupando el router de traefik del entorno principal**. Ahora
+  arranca el que la copia declara, **delega** en `okoworktree up <nombre>` cuando no existe, y
+  **comprueba el estado final** antes de decir que lo levantó: antes afirmaba «levantado» y salía 0
+  con el contenedor parado.
+- **3.3.0** — La **raíz** de `up.sh`: conservaba `$SCRIPT_DIR/../..`, que desde la mudanza resuelve a
+  `~/Dev/Tooling`, donde no hay compose. Cuarto sitio con ese defecto —la 3.0.0 lo arregló en tres—.
+  Y el mensaje de «no encuentro el compose» dice ahora **en qué raíz buscó** y con qué candidatos.
+- **3.3.0** — Se cierra la cadena que acababa en un **403 sin explicación**: falta el
+  `.fs-test-env.env` → falta el `test.conf` renderizado → el motor, al montar un bind sobre un fichero
+  que no existe, **crea un directorio** con ese nombre → el vhost no carga → apache sirve su sitio por
+  defecto → 403. `init-project.sh` moría con «Is a directory», un error de bash y no un diagnóstico.
+- **3.3.0** — Arreglado un **fallo mudo preexistente**: `init-project.sh` salía con rc 1 y **cero
+  salida** en un proyecto sin `config.php`, mientras el comentario de al lado prometía una guarda que
+  estaba setenta líneas más adelante, a la que nunca se llegaba.
+- **3.3.0** — Queda **escrito en el README** lo que la guarda no alcanza: el **403 del runner** lo ve
+  quien abre el navegador sin invocar ningún script, y ahí el arnés no está en el camino. Se le quita
+  la causa, no se le pone un aviso. Y **`TESTENV_COMPOSE_FILE` no se añade** al registro ni al `.env`:
+  sería una clave nueva y para siempre para tapar un bug de derivación de una línea.
 
 ### 3.2.0 — Refrescar la base de pruebas, y un flag que se retira
 
