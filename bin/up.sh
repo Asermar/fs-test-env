@@ -18,14 +18,68 @@
 #   TESTENV_SERVICE      nombre del servicio en el compose (def: testmesafs -> fs-testenv).
 #   TESTENV_CONTAINER    nombre del contenedor (def: derivado del servicio).
 #   TESTENV_COMPOSE_FILE ruta al compose. Si no se define, se autodetecta bajo la raíz.
-#   FS_PROJECT_ROOT      raíz del proyecto (def: el directorio actual).
+#   FS_PROJECT_ROOT      raíz del proyecto (def: la del repositorio en el que estás).
+#
+# Opciones:
+#   --en-el-principal   escape para levantar el entorno en el checkout PRINCIPAL, donde se niega
+#                       por defecto (ver bin/lib/ancla.sh). Avisa cada vez.
+#
+# Lo que no se reconozca hace FALLAR la invocación (rc 2) en vez de ignorarse.
 # =============================================================================
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+
+# --- opciones ---------------------------------------------------------------------------------
+PERMITIR_PRINCIPAL=0
+for _a in "$@"; do
+    case "$_a" in
+        --en-el-principal) PERMITIR_PRINCIPAL=1 ;;
+        *)
+            echo "ERROR: opción desconocida: '$_a'." >&2
+            echo "  La única que hay:" >&2
+            echo "    --en-el-principal   escape para levantar en el checkout principal (avisa)." >&2
+            exit 2
+            ;;
+    esac
+done
+
+# LA RAÍZ DEL PROYECTO, Y AQUÍ ESTABA EL DEFECTO QUE DEJABA ESTE SCRIPT INSERVIBLE.
+#
+# Subir dos niveles desde `bin/` era correcto cuando el arnés vivía DENTRO del proyecto como
+# `test-bin/`. Desde que vive en `Tooling/fs-test` resuelve a `~/Dev/Tooling`, que no es el proyecto
+# de nadie — medido: ahí no hay compose, así que la autodetección no encontraba nada y el script
+# moría pidiendo `TESTENV_COMPOSE_FILE`.
+#
+# EL DIAGNÓSTICO QUE ESO PROVOCA ES EL CARO: parece que falta configuración, y el arreglo aparente
+# es añadir `TESTENV_COMPOSE_FILE` al registro o al `.env` generado — o sea, una clave nueva y para
+# siempre en el registro para tapar un bug de derivación de una línea. El candidato correcto
+# (`<raíz>/podman/podman-compose.yaml`) YA estaba en la lista de abajo; lo que estaba mal era la
+# raíz. Es el cuarto sitio con este mismo defecto: la v3.0.0 lo arregló en el provisionador, en
+# `init-project.sh` y en el runner web, y luego apareció en el teardown.
+#
+# Se deriva del REPOSITORIO, como `init-project.sh`, y no del directorio actual como el
+# provisionador: este script se lanza desde un botón (la sección Scripts de OkoGit) cuyo directorio
+# puede ser cualquier subcarpeta del proyecto, y `--show-toplevel` acierta desde todas.
+FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || echo "$PWD")}"
 [ -f "$FS_PROJECT_ROOT/.fs-test-env.env" ] && . "$FS_PROJECT_ROOT/.fs-test-env.env"
+
+# --- EL ENTORNO DE TEST VIVE EN UNA COPIA -------------------------------------------------------
+# Va ANTES de tocar el motor de contenedores: un rechazo no debe dejar nada arrancado. Y esta puerta
+# importa más que la de la generación, porque lo que levanta aquí es un contenedor que autoprovisiona
+# — sin la guarda, el contenedor arranca, el provisionador de dentro SÍ se niega (su guarda existe) y
+# queda un contenedor en marcha sin entorno, con el error sólo en un log que nadie mira.
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/ancla.sh"
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/lib/registro.sh"
+if ancla_es_principal "$FS_PROJECT_ROOT" && [ "$PERMITIR_PRINCIPAL" = 0 ]; then
+    ancla_niega "$FS_PROJECT_ROOT" "$(registro_id_de "$FS_PROJECT_ROOT" 2>/dev/null || true)" \
+        "levantar el entorno de test" "$0 --en-el-principal"
+    exit 1
+fi
+[ "$PERMITIR_PRINCIPAL" = 1 ] && ancla_avisa_escape "$FS_PROJECT_ROOT" "levantando el entorno de test"
 
 CONTAINER_ENGINE="${CONTAINER_ENGINE:-podman}"
 TESTENV_SERVICE="${TESTENV_SERVICE:-fs-testenv}"
@@ -69,17 +123,32 @@ find_compose() {
             "$FS_PROJECT_ROOT/compose.yaml"
         )
     fi
+    # Se publican para que el mensaje de error pueda enumerarlos: decir dónde se buscó es la mitad
+    # del diagnóstico, y sin ella el fallo apunta al sitio equivocado.
+    CANDIDATOS_PROBADOS=("${candidates[@]}")
     local f
     for f in "${candidates[@]}"; do
-        [ -f "$f" ] && { echo "$f"; return; }
+        [ -f "$f" ] && { COMPOSE_FILE="$f"; return 0; }
     done
     return 1
 }
+CANDIDATOS_PROBADOS=()
+COMPOSE_FILE=
 
-COMPOSE_FILE="$(find_compose || true)"
+# SE LLAMA SIN `$( )` A PROPÓSITO: dentro de una substitución de comandos, las asignaciones ocurren
+# en una subshell y NO llegan aquí — medido: el array de candidatos volvía con 0 elementos, así que
+# el mensaje de abajo habría enumerado la nada justo cuando más falta hace.
+find_compose || true
 if [ -z "$COMPOSE_FILE" ] || [ ! -f "$COMPOSE_FILE" ]; then
+    # EL MENSAJE DICE LA RAÍZ EN LA QUE BUSCÓ, que es lo que faltaba. Sin eso, un fallo por una raíz
+    # mal derivada se lee como «falta configuración» y manda a definir una variable que no hacía
+    # falta — que es exactamente lo que pasó mientras la raíz salía de la ubicación del script.
     echo "ERROR: no se encuentra el fichero compose del proyecto." >&2
-    echo "       Define TESTENV_COMPOSE_FILE en .fs-test-env.env (ruta al compose)." >&2
+    echo "       Raíz en la que he buscado: $FS_PROJECT_ROOT" >&2
+    echo "       Candidatos ($CONTAINER_ENGINE):" >&2
+    [ "${#CANDIDATOS_PROBADOS[@]}" -gt 0 ] && printf '         %s\n' "${CANDIDATOS_PROBADOS[@]}" >&2
+    echo "       Si la raíz no es la que esperabas, dila: FS_PROJECT_ROOT=/ruta $0" >&2
+    echo "       Si el compose está en otro sitio: TESTENV_COMPOSE_FILE en .fs-test-env.env." >&2
     exit 1
 fi
 
