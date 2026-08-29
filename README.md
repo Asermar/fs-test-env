@@ -10,9 +10,14 @@ Tooling reutilizable para montar un **entorno de pruebas de FacturaScripts** (PH
 ejecutar los tests de los plugins, con un **runner web** navegable — sin tocar la instalación ni
 la base de datos de trabajo del proyecto.
 
-Pensado para montarse como **submódulo git** (`test-bin/`) en cualquier proyecto FacturaScripts.
+Se instala **una vez** —en la instalación de herramientas de la casa, `~/Dev/Tooling/fs-test`— y lo
+comparten los proyectos que lo usan; hasta la v3.0.0 era un submódulo `test-bin/` dentro de cada uno.
 No contiene ningún valor específico de un proyecto: la configuración del despliegue se genera con
-`init-project.sh` en un fichero `.fs-test-env.env` del proyecto.
+`init-project.sh` en un fichero `.fs-test-env.env` del proyecto, a partir del registro de
+instalaciones (`config/instalaciones.conf`).
+
+> En los ejemplos de este README, **`$FS_TEST` es donde está instalado el arnés** — en la flota,
+> `~/Dev/Tooling/fs-test`. Se apunta ahí; no se copia dentro del proyecto.
 
 ## Manual de uso
 
@@ -30,7 +35,9 @@ la interfaz incluidos), no requiere servidor.
   entorno con todos los plugins **desactivados**. Genera dentro del core de pruebas
   `warmup-schema.php`, `phpunit-webrunner.xml` y un `Test/install-plugins.php` que **sincroniza**
   al conjunto exacto de `Test/Plugins/install-plugins.txt` (activa/desactiva) — así funcionan los
-  tests de *ausencia* de un plugin.
+  tests de *ausencia* de un plugin. Con **`--recrear-bd`** tira la BD antes de crearla (ver
+  [Refrescar la BD de pruebas](#refrescar-la-bd-de-pruebas)).
+- `bin/test-env-teardown.sh` — el inverso: borra el directorio del entorno **y la BD de pruebas**.
 - `bin/setup-test-env.sh` — front interactivo para el host (deps, prompts) que delega en la provisión.
 - `bin/up.sh` — levanta el contenedor del entorno de test de forma **idempotente**: si ya está
   corriendo no hace nada; si está parado o no existe, lo levanta con el compose del proyecto
@@ -45,22 +52,25 @@ la interfaz incluidos), no requiere servidor.
 ## Cómo montarlo en un proyecto FacturaScripts
 
 ```bash
-# 1) añadir como submódulo
-git submodule add git@github.com:Asermar/fs-test-env.git test-bin
-
-# 2) generar la configuración del despliegue (interactivo)
-test-bin/bin/init-project.sh
+# 1) generar la configuración del despliegue
+$FS_TEST/bin/init-project.sh
 #    -> crea .fs-test-env.env  y  .fs-test-env/{test.conf,service.yaml}
+#    (una copia de trabajo hereda la configuración de producto de su ancla en el registro;
+#     un proyecto nuevo pregunta lo que no se puede inferir y se da de alta)
 
-# 3) integrar en tu compose el servicio de .fs-test-env/service.yaml y levantarlo
+# 2) integrar en tu compose el servicio de .fs-test-env/service.yaml y levantarlo
 #    podman-compose up -d <servicio>     # si CONTAINER_ENGINE=podman
 #    docker compose up -d <servicio>     # si CONTAINER_ENGINE=docker
-#    (monta .fs-test-env/test.conf como sitio apache del contenedor)
+#    (monta .fs-test-env/test.conf como sitio apache, y el arnés en solo lectura)
 
-# 4) provisionar el entorno
-test-bin/bin/setup-test-env.sh          # en el host (interactivo)
+# 3) provisionar el entorno
+$FS_TEST/bin/setup-test-env.sh          # en el host (interactivo)
 #    o dejar que el contenedor lo haga al arrancar (TESTENV_AUTO_PROVISION=1)
 ```
+
+> El entorno de test vive en una **copia de trabajo**, no en el checkout principal: el provisionador
+> se niega ahí (con escape `--en-el-principal`, que avisa). Lo normal es no invocarlo a mano —
+> `okoworktree add <nombre> --db-mode fresh` crea la copia, su stack y su entorno de test.
 
 ### Podman o Docker
 
@@ -78,7 +88,7 @@ El resto del servicio (red, volúmenes, comando de provisión, labels de traefik
 ## Levantar el entorno (contenedor)
 
 ```bash
-test-bin/bin/up.sh
+$FS_TEST/bin/up.sh
 #  - si el contenedor ya está corriendo: no toca nada
 #  - si no: <engine>-compose up -d <servicio>  (crea/arranca y auto-provisiona)
 ```
@@ -90,7 +100,14 @@ otra ruta, define **`TESTENV_COMPOSE_FILE`** (absoluta o relativa a la raíz) en
 
 ## Configuración
 
-Prioridad de lectura: **variables de entorno** → `<proyecto>/.fs-test-env.env` → **defaults**.
+Prioridad de lectura: `<proyecto>/.fs-test-env.env` → **variables de entorno** → **defaults**.
+
+**Y el orden importa más de lo que parece: el fichero PISA el entorno.** Los scripts lo sourcean
+*después* de leer las variables y sus asignaciones son incondicionales (`TEST_DB="…"`, no
+`TEST_DB="${TEST_DB:-…}"`), así que `TEST_DB=otra bin/test-env-provision.sh` **no cambia la base** si
+el fichero la declara — el provisionador imprime en su cabecera la que usa de verdad, y ahí se ve.
+Para cambiar un valor que el fichero fija, se edita el fichero. Las variables de entorno sólo ganan
+sobre lo que el fichero **no** declara.
 Variables principales (ver `config.env.example`): `FS_CORE_DIR` (layout del core: `src` o `.`),
 `TESTENV_REPO_PATH` (ruta absoluta idéntica host/contenedor), `TEST_DB`, `CORE_REPO`/`CORE_BRANCH`,
 `FS_LANG`/`FS_TIMEZONE`, `TEST_WEB_TITLE`, y las de contenedor/red/proxy (`TESTENV_*`).
@@ -99,6 +116,68 @@ Variables principales (ver `config.env.example`): `FS_CORE_DIR` (layout del core
 vacío, el provisionador usa el **tag de la versión instalada** (`v<Kernel::version()>`, p.ej.
 `v2026.3`), con fallback a `master`. El provisionador interactivo (`setup-test-env.sh`) ofrece,
 además de la instalada, las **5 versiones (tags) más recientes** del repo de origen.
+
+## Refrescar la BD de pruebas
+
+`test-env-provision.sh` es idempotente y **reusa** la BD que encuentra, así que los datos de una
+corrida anterior sobreviven a todos los reaprovisionamientos. Eso es cómodo hasta que un test cuenta
+filas sin filtrar: entonces el «verde» es un verde **sobre una base sucia**, y sólo se nota cuando ya
+ha dado una respuesta equivocada.
+
+```bash
+$FS_TEST/bin/test-env-provision.sh --recrear-bd
+```
+
+Tira la BD de pruebas y la vuelve a crear vacía —`utf8mb4` / `utf8mb4_unicode_520_ci`, la misma
+colación que una base recién creada—, **conservando el clon del core y su `vendor`**. Es el caso
+frecuente: *los ficheros están bien y los datos están sucios*.
+
+> **No es más rápido que la vía larga, y conviene saberlo antes de elegir.** Medido en Mesa/FS el
+> 28-ago-2026, misma copia, una pasada de cada una: `--recrear-bd` **105,6 s**; `teardown` (0,8 s) +
+> provisión completa (98,7 s) = **99,5 s**. Casi todo el coste es el **warm-up del esquema** —activar
+> los plugins e instanciar los ~290 modelos, 89 s— y **las dos vías lo pagan igual**. Lo que el
+> refresco se ahorra es sólo el clon del core (**6 s**) y el `composer install` (**3 s**, medido en
+> frío y sin caché en la máquina), que se pierden en la variación entre pasadas.
+>
+> Lo que sí aporta, y es por lo que está: es **una** orden en vez de dos, así que no hay una ventana
+> en la que el entorno no exista —si alguien hace el teardown y olvida provisionar, se queda sin
+> entorno—, y deja la base vacía **sin tocar el árbol**, que es lo que un consumidor como el
+> `db_fresh` de `okoworktree` necesita. Si el ahorro de tiempo es lo que buscas, no lo hay.
+
+**No deja la base vacía al terminar**, y eso es lo que se quiere: sólo cambia el paso de creación, y
+el resto de la provisión —config, enlaces, activación y warm-up— se ejecuta igual, así que la base
+acaba **con su esquema** y con todos los plugins desactivados, indistinguible de una recién creada.
+
+Las dos vías, y cuál es cada una:
+
+| lo que está mal | qué hace falta | orden | medido |
+|---|---|---|---|
+| los **datos** están sucios | rehacer la base; los ficheros valen | `test-env-provision.sh --recrear-bd` | 105,6 s |
+| el **core o el `vendor`** están mal o desfasados | rehacer los ficheros; la base también | `test-env-teardown.sh` y después `test-env-provision.sh` | 99,5 s |
+
+Dos guardas que conviene conocer antes de usarlo:
+
+- **Nunca puede alcanzar la BD de trabajo**: si el `TEST_DB` derivado coincide con el `FS_DB_NAME` del
+  proyecto, se niega antes de escribir nada.
+- **Comprueba el efecto, no que el comando volviera**: mira el retorno del `DROP` y del `CREATE`, y
+  después **pregunta por consulta** que la base quedó a 0 tablas. Sin eso, un `DROP` sin permisos
+  seguido de un `CREATE IF NOT EXISTS` que no hace nada imprimiría «BD lista» con la basura dentro:
+  un fallo reportado como éxito.
+
+### `--keep-db` se retiró, y pasarlo FALLA
+
+`test-env-teardown.sh` elimina la BD de pruebas **siempre**. El flag `--keep-db`, que la conservaba,
+ya no existe: el único escenario que lo justificaba —rehacer los ficheros sin rehacer la base— vale
+menos que el riesgo de un verde sobre datos contaminados.
+
+Pasarlo **no se ignora: falla** con rc 2 y sin tocar nada. Ignorarlo haría que el teardown tirase la
+base justo cuando quien lo invocó pedía conservarla, en silencio, y quien lo tuviera escrito en un
+guion o en un botón no se enteraría nunca de que su suposición dejó de valer.
+
+Por el mismo motivo, **los dos scripts rechazan cualquier opción que no reconozcan** en vez de
+ignorarla, que es lo que hacían antes: un `--recrear-bd` mal escrito se tragaría, la provisión
+seguiría **sin refrescar** la base y saldría 0. Si ves «opción desconocida», la herramienta no está
+rota — está diciendo que ese flag no significa lo que crees.
 
 ## Ejecutar los tests
 
@@ -146,29 +225,45 @@ configuración de producto de su ancla, que una instalación nueva de verdad sig
 copia sin ancla falla en vez de registrarse, y que las guardas de la base de test siguen viendo a las
 copias. **22 comprobaciones, en torno a un segundo.**
 
-**`test/provision.sh`** — comprueba la guarda del provisionador: que **el entorno de test vive en
-una copia, no en el checkout principal**. 12 comprobaciones, ~0,15 s.
+**`test/provision.sh`** — comprueba las dos decisiones del provisionador: que **el entorno de test
+vive en una copia, no en el checkout principal**, y que **`--recrear-bd` se acepta mientras lo
+desconocido se rechaza** (incluido el caso que lo motiva: un typo `--recrear-db`, que antes se
+ignoraba en silencio). **19 comprobaciones, ~0,2 s.**
+
+**`test/teardown.sh`** — comprueba que **`--keep-db` se retiró y pasarlo falla sin borrar nada**, y
+que la raíz del proyecto sale del directorio actual. Lleva su **control positivo** —la invocación sin
+opciones, que sí borra—, porque «no hizo nada» se cumple también con un script que no hace nada
+nunca. **15 comprobaciones.**
 
 ```bash
 test/registro.sh                  # desde la raíz del arnés
 test/provision.sh
+test/teardown.sh
 test/registro.sh /ruta/al/arnes   # o diciéndole dónde está
 ```
 
 Sale **0** si todo está en verde y **1** si algo falla, así que sirve de puerta en un script.
 
-**Son autocontenidas**: se fabrican sus instalaciones y sus repos de pega en un temporal y lo borra al salir, así que
-**no toca el registro versionado, ni el fichero de máquina, ni ningún proyecto real**. No necesita
-contenedores, ni base de datos, ni red — se puede correr en cualquier momento, también con el entorno
-apagado.
+**Son autocontenidas**: se fabrican sus instalaciones y sus repos de pega en un temporal y lo borran
+al salir, así que **no tocan el registro versionado, ni el fichero de máquina, ni ningún proyecto
+real**. No necesitan contenedores, ni base de datos, ni red — se pueden correr en cualquier momento,
+también con el entorno apagado.
 
 > **Este repo no tiene CI, ni Makefile, ni hook que la ejecute**, y `okorelease` tampoco la exige. O
-> sea que la única forma de que se ejecute es que alguien la invoque: pásala **antes de cerrar una
-> rama** que toque `bin/init-project.sh`, `bin/lib/registro.sh` o `bin/test-env-provision.sh`.
+> sea que la única forma de que se ejecute es que alguien la invoque: pásalas **antes de cerrar una
+> rama** que toque `bin/init-project.sh`, `bin/lib/registro.sh`, `bin/test-env-provision.sh` o
+> `bin/test-env-teardown.sh`.
 
-> **Nació después del código que comprueba**, así que su valor es de **regresión**: atrapa lo que se
-> rompa de aquí en adelante, no acredita que lo ya escrito se hiciera con ella delante. Está dicho
-> también en su propia cabecera, que es donde lo leerá quien la abra.
+> **`registro.sh` y `provision.sh` nacieron después del código que comprueban**, así que su valor es
+> de **regresión**: atrapan lo que se rompa de aquí en adelante, no acreditan que lo ya escrito se
+> hiciera con ellas delante. Está dicho también en su propia cabecera, que es donde lo leerá quien la
+> abra. **`teardown.sh` es la primera que nació con su cambio**, en la misma rama que retira
+> `--keep-db`.
+
+> **Y lo que NO cubren, porque no cabe sin una base de datos**: que el `DROP` de `--recrear-bd`
+> ocurra de verdad y que el teardown borre la BD. Las baterías comprueban el *parseo* y el
+> *rechazo*; el refresco se verifica contra un entorno real, en una copia de trabajo. «Todas en
+> verde» aquí no acredita el refresco.
 
 ## Testing de mutación
 
@@ -210,10 +305,10 @@ un **tag** `vX.Y.Z` por release. La web lo muestra en la cabecera (`entorno vX.Y
 Para saber si los scripts instalados están al día respecto al remoto:
 
 ```bash
-test-bin/bin/version.sh
+$FS_TEST/bin/version.sh
 #  Entorno de test instalado: v1.0.0
 #  Entorno de test remoto:    v1.0.1
-#  => Hay una versión más reciente (v1.0.1). Actualiza el submódulo test-bin: ...
+#  => Hay una versión más reciente (v1.0.1). Actualiza el arnés: ...
 ```
 
 Al hacer cambios en el tooling, sube el número de `VERSION` y crea el tag correspondiente.
