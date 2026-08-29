@@ -12,15 +12,29 @@
 #
 # La config se lee de <proyecto>/.fs-test-env.env (igual que el provisionador).
 #
+# La BD de pruebas se elimina SIEMPRE. `--keep-db` se retiró: conservar los datos de una corrida
+# anterior dejó de ser algo que este arnés ofrezca, y pasarlo ahora FALLA (ver el parseo).
+#
 # Uso:
-#   .sync/... test-env-teardown.sh            # borra el directorio + la BD de pruebas
-#   test-env-teardown.sh --keep-db            # borra solo el directorio, conserva la BD
+#   test-env-teardown.sh                      # borra el directorio y la BD de pruebas
+#
+# Para refrescar la BD SIN rehacer los ficheros —el caso frecuente y barato— esto no es la
+# herramienta: es `test-env-provision.sh --recrear-bd`.
 # =============================================================================
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+# Raíz del proyecto: la dice quien invoca. Subir dos niveles desde aquí era correcto cuando el arnés
+# vivía DENTRO del proyecto como `test-bin/`; desde que vive en `Tooling/fs-test` resuelve a
+# `~/Dev/Tooling`, que no es un proyecto — el mismo defecto que la v3.0.0 arregló en el
+# provisionador, en `init-project.sh` y en el runner web, y que aquí quedó sin arreglar.
+#
+# NO ERA INOCUO: con el default viejo, la orden documentada en el CLAUDE.md de Mesa/FS
+# (`~/Dev/Tooling/fs-test/bin/test-env-teardown.sh` desde la raíz del proyecto) buscaba el
+# `config.php` en `Tooling/src/`, no lo encontraba y OMITÍA el borrado de la base con un aviso. O
+# sea que el teardown documentado no tiraba la base, que es su trabajo principal.
+FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$PWD}"
 [ -f "$FS_PROJECT_ROOT/.fs-test-env.env" ] && . "$FS_PROJECT_ROOT/.fs-test-env.env"
 
 FS_CORE_DIR="${FS_CORE_DIR:-src}"
@@ -29,8 +43,58 @@ SRC_CONFIG="$CORE_ROOT/config.php"
 TESTENV_DIR="${TESTENV_DIR:-$FS_PROJECT_ROOT/test-env/facturascripts}"
 TEST_DB="${TEST_DB:-fs_test}"
 
-KEEP_DB=0
-[ "${1:-}" = "--keep-db" ] && KEEP_DB=1
+# --- parseo: `--keep-db` SE RETIRÓ Y FALLA ---------------------------------------------------
+#
+# Va aquí arriba, ANTES del `rm -rf`, para que una invocación con el flag viejo no borre nada.
+#
+# ## POR QUÉ FALLA EN VEZ DE IGNORARSE, que es la parte que no es obvia
+#
+# Ignorar un flag desconocido haría que este script TIRASE la base justo cuando quien lo invocó
+# pedía conservarla —el daño exacto que el flag existía para evitar— y sin una línea de aviso. Y
+# quien lo tuviera escrito en un guion o en un botón no se enteraría nunca de que su suposición
+# dejó de valer. Un flag que ya no significa lo que su llamador cree tiene que fallar.
+#
+# ## POR QUÉ SE RETIRÓ (Alexis, 27-ago-2026)
+#
+# El único escenario que lo justificaba es rehacer los FICHEROS del entorno sin rehacer la base, y
+# el precio de recrear la base es menor que el de permitir contaminación y luego tests falsos: es
+# una elección de riesgo, no de comodidad. Recrear cuesta minutos; un verde sobre una base
+# contaminada cuesta una decisión equivocada, y eso ya se pagó.
+#
+# Medido antes de retirarlo: NADIE lo invocaba —ni un script ni un botón—, así que no hay llamador
+# que romper.
+for _a in "$@"; do
+    case "$_a" in
+        --keep-db)
+            cat >&2 <<'FIN'
+ERROR: «--keep-db» se retiró y esta invocación NO ha hecho nada.
+
+  No se ignora a propósito: si se ignorase, este teardown tiraría la BD de pruebas justo cuando
+  quien lo invocó pedía conservarla, y en silencio. Si lo tienes escrito en un guion o en un
+  botón, ése es el sitio a corregir.
+
+  Por qué salió: conservar los datos de una corrida anterior dejó de ser algo que el arnés
+  ofrezca. Recrear la base cuesta minutos; un «tests en verde» sobre datos ajenos cuesta una
+  decisión equivocada.
+
+  Qué usar en su lugar:
+
+      test-env-provision.sh --recrear-bd    refresca la BD y CONSERVA el clon del core y su
+                                            vendor, que es lo que costaba minutos. Es el caso
+                                            para el que se usaba --keep-db al revés.
+      test-env-teardown.sh                  se lo lleva todo: directorio y BD.
+FIN
+            exit 2
+            ;;
+        *)
+            echo "ERROR: opción desconocida: '$_a'." >&2
+            echo "  Este script no acepta opciones: borra el directorio del entorno y la BD de" >&2
+            echo "  pruebas, siempre. Se rechaza en vez de ignorarse para que un flag que alguien" >&2
+            echo "  crea que significa algo no pase inadvertido." >&2
+            exit 2
+            ;;
+    esac
+done
 
 # --- salida de progreso (coloreada + con hora), alineada con test-env-provision.sh ---
 # Color por defecto: la ventana de OkoGit no es un TTY pero renderiza ANSI; NO_COLOR
@@ -63,7 +127,7 @@ esac
 printf '%s================================================================%s\n' "$C_STEP" "$C_RESET"
 printf '%sEliminación del entorno de pruebas%s\n' "$C_STEP" "$C_RESET"
 echo "Directorio : $TESTENV_DIR"
-echo "BD test    : $TEST_DB $([ "$KEEP_DB" -eq 1 ] && echo '(se conserva)' || echo '(se elimina)')"
+echo "BD test    : $TEST_DB (se elimina)"
 printf '%s================================================================%s\n' "$C_STEP" "$C_RESET"
 
 # --- 1) borrar el directorio del core de pruebas ---
@@ -80,10 +144,8 @@ else
     log_step "El directorio ya no existe, nada que borrar: $TESTENV_DIR"
 fi
 
-# --- 2) eliminar la BD de pruebas (salvo --keep-db) ---
-if [ "$KEEP_DB" -eq 1 ]; then
-    log_step "Se conserva la BD de pruebas ($TEST_DB) por --keep-db."
-elif [ ! -f "$SRC_CONFIG" ]; then
+# --- 2) eliminar la BD de pruebas (siempre) ---
+if [ ! -f "$SRC_CONFIG" ]; then
     log_warn "No existe $SRC_CONFIG; no puedo leer credenciales, omito el borrado de la BD."
 elif ! command -v php >/dev/null 2>&1; then
     log_warn "Falta 'php'; omito el borrado de la BD de pruebas."
