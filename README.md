@@ -29,7 +29,9 @@ la interfaz incluidos), no requiere servidor.
 ## Contenido
 
 - `bin/init-project.sh` — genera `.fs-test-env.env` y renderiza el vhost apache y el servicio
-  compose desde `templates/`.
+  compose desde `templates/`. Se **niega en el checkout principal** salvo con `--en-el-principal`,
+  que es como se da de alta el ancla de un proyecto (ver
+  [El entorno de test vive en una copia](#el-entorno-de-test-vive-en-una-copia-no-en-el-checkout-principal)).
 - `bin/test-env-provision.sh` — provisión no interactiva: clona/actualiza el core, `composer
   install`, crea la BD de pruebas, enlaza los plugins, construye el esquema (warm-up) y deja el
   entorno con todos los plugins **desactivados**. Genera dentro del core de pruebas
@@ -42,7 +44,11 @@ la interfaz incluidos), no requiere servidor.
 - `bin/up.sh` — levanta el contenedor del entorno de test de forma **idempotente**: si ya está
   corriendo no hace nada; si está parado o no existe, lo levanta con el compose del proyecto
   (`<engine>-compose up -d <servicio>`), y el arranque provisiona/actualiza el entorno.
-  No interactivo (pensado para un botón, p.ej. la sección Scripts de OkoGit).
+  No interactivo (pensado para un botón, p.ej. la sección Scripts de OkoGit). Se **niega en el
+  checkout principal** salvo con `--en-el-principal`, y **comprueba que el contenedor quedó
+  corriendo** antes de decir que lo levantó.
+- `bin/lib/ancla.sh` — la guarda del checkout principal: la señal, el mensaje que ofrece la salida y
+  el porqué, en un solo sitio para los tres scripts que pueden montar el entorno.
 - `bin/plugin-topo-order.php` — ordena plugins por sus dependencias `require`.
 - `web/` — runner web (PHP plano + JS): lista los plugins con tests, muestra la **descripción
   markdown** (`@description`) de cada test y ejecuta las suites mostrando los resultados.
@@ -116,6 +122,54 @@ Variables principales (ver `config.env.example`): `FS_CORE_DIR` (layout del core
 vacío, el provisionador usa el **tag de la versión instalada** (`v<Kernel::version()>`, p.ej.
 `v2026.3`), con fallback a `master`. El provisionador interactivo (`setup-test-env.sh`) ofrece,
 además de la instalada, las **5 versiones (tags) más recientes** del repo de origen.
+
+## El entorno de test vive en una copia, no en el checkout principal
+
+Con desarrollo por worktrees el entorno vive en la copia, y **la existencia de la copia es su
+declaración de propiedad**: si la copia existe tiene dueño, y si no existe el entorno es basura. Los
+tres scripts que pueden montarlo se niegan en el checkout principal:
+
+| script | qué haría ahí |
+|---|---|
+| `init-project.sh` | generar el `.fs-test-env.env` y el `.fs-test-env/` |
+| `up.sh` | levantar el contenedor, que autoprovisiona |
+| `test-env-provision.sh` | crear el entorno entero |
+
+El rechazo **cita la entrada del registro** y ofrece la salida en el mismo mensaje —
+`okoworktree add <nombre> --db-mode fresh`—, porque quien llega ahí suele venir a dejar los tests en
+verde para cerrar una rama y una negativa a secas lo deja igual de atascado.
+
+**El escape es `--en-el-principal`**, y avisa cada vez. Es un flag y no una variable de entorno a
+propósito: una variable se exporta una vez y se olvida, y a partir de ahí el rechazo dejaría de
+rechazar sin que nadie lo notara.
+
+> **El caso legítimo en el principal es uno: DAR DE ALTA EL ANCLA** del proyecto con
+> `init-project.sh --en-el-principal`. El ancla la crea el proyecto, no la primera copia, y es el
+> paso previo a poder abrir worktrees ahí. Sólo configura: no crea base, ni clona el core, ni levanta
+> contenedores.
+
+La señal es de git —`--absolute-git-dir` frente a `--git-common-dir`— y no el nombre de la carpeta ni
+el tipo de `.git`: en un **submódulo** el `.git` también es un fichero, así que con esa señal cada
+plugin de un superproyecto pasaría por copia. Vive en `bin/lib/ancla.sh`, una sola vez para los tres.
+
+### Lo que la guarda NO alcanza, dicho para que no se descubra
+
+Un caso real de esta semana llegó al principal de Mesa/FS por **tres síntomas**, y ninguno decía por
+qué ni adónde ir: el `.fs-test-env.env` inexistente, el `test-bin` ausente y sin declarar en
+`.gitmodules`, y **el runner respondiendo 403**. Contra los scripts del arnés, los tres están
+cubiertos: cualquiera de los tres —`init-project.sh`, `up.sh`, `test-env-provision.sh`— cita la
+entrada del registro y ofrece el `okoworktree add`.
+
+Pero **el 403 no es una de esas puertas**: lo ve quien abre el navegador sin haber invocado ningún
+script, y ahí el arnés no está en el camino — lo contesta apache, o traefik, antes de llegar a su
+PHP. Lo que sí se hace es **quitarle la causa**, que es una cadena que se ve desde tres sitios y que
+ninguno nombraba: falta el `.fs-test-env.env` → falta el `test.conf` renderizado → el motor de
+contenedores, al montar un bind sobre un fichero que no existe, **crea un directorio con ese
+nombre** → el vhost no carga → apache cae a su sitio por defecto → **403**. `init-project.sh` ahora
+se niega al encontrar ese directorio y dice cómo deshacerlo.
+
+Y el `test-bin` ausente tampoco es del arnés: lo ve quien mira el repo del cliente, no quien invoca
+una herramienta. Su sitio es el `CLAUDE.md` de ese repo y el mensaje del propio git.
 
 ## Refrescar la BD de pruebas
 
@@ -225,10 +279,21 @@ configuración de producto de su ancla, que una instalación nueva de verdad sig
 copia sin ancla falla en vez de registrarse, y que las guardas de la base de test siguen viendo a las
 copias. **22 comprobaciones, en torno a un segundo.**
 
-**`test/provision.sh`** — comprueba las dos decisiones del provisionador: que **el entorno de test
-vive en una copia, no en el checkout principal**, y que **`--recrear-bd` se acepta mientras lo
-desconocido se rechaza** (incluido el caso que lo motiva: un typo `--recrear-db`, que antes se
-ignoraba en silencio). **19 comprobaciones, ~0,2 s.**
+> **En una copia de trabajo, el compose base levanta el contenedor del ORIGINAL.** El compose declara
+> los `container_name` sin sufijo y quien se lo pone a una copia es el overlay que genera
+> `okoworktree`, que `up.sh` no tiene. Medido en `Mesa/FS-wt-guardaancla`: la invocación devolvía 0,
+> el contenedor de la copia seguía `Exited` sin una línea de log nueva, **y aparecía un `mesa-fs-test`
+> recién creado** —el nombre del original— montando el árbol de la copia y ocupando su router de
+> traefik. Así que `up.sh` **arranca con el motor** el contenedor que la copia declara, **delega en
+> `okoworktree up <nombre>`** cuando no existe, y **comprueba el estado final** antes de decir que lo
+> levantó: antes afirmaba «levantado» y salía 0 con el contenedor parado.
+
+**`test/provision.sh`** — comprueba la **guarda del ancla en los tres scripts que pueden montar el
+entorno** (`test-env-provision.sh`, `init-project.sh` y `up.sh`): que en el checkout principal se
+niegan sin escribir ni levantar nada, que **en un worktree NO se niegan** —el control negativo, que
+es lo que evita apagar el entorno de toda la casa—, que un submódulo sigue contando como principal, y
+que el escape avisa. Y el parseo: que **lo desconocido se rechaza** (incluido el caso que lo motiva,
+un typo `--recrear-db` que antes se ignoraba en silencio). **39 comprobaciones, ~0,3 s.**
 
 **`test/teardown.sh`** — comprueba que **`--keep-db` se retiró y pasarlo falla sin borrar nada**, y
 que la raíz del proyecto sale del directorio actual. Lleva su **control positivo** —la invocación sin

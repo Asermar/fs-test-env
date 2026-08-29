@@ -13,11 +13,37 @@
 #
 # Uso:  <arnés>/bin/init-project.sh            (interactivo)
 #       VAR=... <arnés>/bin/init-project.sh    (no interactivo, toma de entorno)
+#
+# Opciones:
+#   --en-el-principal   escape para configurar en el checkout PRINCIPAL. Se niega ahí porque el
+#                       entorno de test vive en la copia (ver bin/lib/ancla.sh), y el único caso
+#                       legítimo es DAR DE ALTA EL ANCLA del proyecto — que es justo lo que se hace
+#                       en el principal, y por eso hay escape y no prohibición. Avisa cada vez.
+#
+# Lo que no se reconozca hace FALLAR la invocación (rc 2) en vez de ignorarse.
 # =============================================================================
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # <arnés>/bin
+
+# --- opciones ---------------------------------------------------------------------------------
+# Estricto por el mismo motivo que en el provisionador: un `--en-el-principal` mal escrito que se
+# ignorara dejaría el rechazo en pie y quien lo escribió creería haberlo saltado, o al revés según
+# el flag. Medido antes de cerrar la puerta: hoy nadie invoca este script con argumentos —la batería
+# `test/registro.sh` lo llama por entorno—, así que no hay llamador que romper.
+PERMITIR_PRINCIPAL=0
+for _a in "$@"; do
+    case "$_a" in
+        --en-el-principal) PERMITIR_PRINCIPAL=1 ;;
+        *)
+            echo "ERROR: opción desconocida: '$_a'." >&2
+            echo "  La única que hay:" >&2
+            echo "    --en-el-principal   escape para configurar en el checkout principal (avisa)." >&2
+            exit 2
+            ;;
+    esac
+done
 FS_TEST_DIR="${FS_TEST_DIR:-$(cd "$SCRIPT_DIR/.." && pwd)}"  # el arnés: derivado de dónde vive ESTE script
 
 # La raíz del PROYECTO ya no se puede deducir de dónde vive el arnés: desde que vive fuera
@@ -55,6 +81,34 @@ NUEVA=0
 HEREDADA=0
 [ -n "$ORIGEN_C" ] && [ "$ORIGEN_C" != "$FS_TEST_ID" ] && HEREDADA=1
 
+# --- EN EL CHECKOUT PRINCIPAL NO SE CONFIGURA (salvo para dar de alta el ancla) ------------------
+#
+# La señal, el mensaje y el porqué están en `lib/ancla.sh`. Aquí sólo importa DÓNDE va: antes de
+# preguntar y antes de escribir, así que un rechazo no deja a medias ni el `.fs-test-env.env` ni el
+# `.fs-test-env/`. Ésa es exactamente la puerta por la que entró el caso del 29-ago-2026, cuando
+# este script corrió contra el principal de Mesa/FS y generó las dos cosas sin protestar.
+#
+# VA ANTES QUE LA GUARDA DE «COPIA SIN ANCLA» de abajo, y no es indiferente: una carpeta llamada
+# `FS-wt-falso` que fuera un repo normal es «copia» para el id y «principal» para git. Manda git,
+# que es lo que dice la regla — habla del árbol de trabajo, no de cómo se llame.
+# shellcheck disable=SC1091
+. "$FS_TEST_DIR/bin/lib/ancla.sh"
+if ancla_es_principal "$FS_PROJECT_ROOT" && [ "$PERMITIR_PRINCIPAL" = 0 ]; then
+    ancla_niega "$FS_PROJECT_ROOT" "$FS_TEST_ID" "generar la configuración del entorno de test" \
+        "$0 --en-el-principal"
+    cat >&2 <<FIN
+
+  ── Y si lo que venías a hacer es DAR DE ALTA EL ANCLA de este proyecto, entonces sí es aquí:
+
+      $0 --en-el-principal
+
+  El ancla la crea el proyecto, no la primera copia, y es el paso previo a poder abrir worktrees.
+  Sólo configura: no crea base, ni clona el core, ni levanta contenedores.
+FIN
+    exit 1
+fi
+[ "$PERMITIR_PRINCIPAL" = 1 ] && ancla_avisa_escape "$FS_PROJECT_ROOT" "generando la configuración"
+
 # --- UNA COPIA SIN ANCLA NO SE CONFIGURA: FALLA Y PIDE CREARLA -----------------------------------
 #
 # El bloque del proyecto es su ANCLA: el punto del que derivan sus copias. Darla de alta es el paso
@@ -78,16 +132,48 @@ ERROR: «$FS_TEST_ID» es una COPIA y su instalación de origen, «$PADRE_ESPERA
   copia que pase. Si lo diera de alta esta copia, quedaría registrada con SU nombre y ninguna copia
   siguiente encontraría a su padre.
 
-  Créala una vez, desde la raíz del proyecto:
+  Créala una vez, desde la raíz del proyecto — y con el escape, porque la raíz del proyecto ES el
+  checkout principal y ahí este script se niega por defecto:
 
       cd "$RAIZ_ANCLA"
-      $FS_TEST_DIR/bin/init-project.sh
+      $FS_TEST_DIR/bin/init-project.sh --en-el-principal
 
   Eso solo CONFIGURA —no crea base, ni clona el core, ni levanta contenedores—, así que se puede
   hacer sin montar el entorno. Luego vuelve aquí y repite.
 FIN
     exit 1
 fi
+
+# --- UN DIRECTORIO DONDE VA UN FICHERO: SE DICE, NO SE MUERE CON UN ERROR DE REDIRECCIÓN ---------
+#
+# Si el proyecto se levantó sin haber generado antes estas piezas, podman monta un bind sobre un
+# fichero que no existe y **crea un DIRECTORIO con ese nombre**. A partir de ahí este generador moría
+# con «.fs-test-env/test.conf: Is a directory» —un error de bash, no un diagnóstico— y el entorno
+# quedaba con el sitio de apache montado como directorio, que es lo que acaba sirviendo un **403** en
+# el runner: el vhost no carga y apache cae a su sitio por defecto.
+#
+# Es la última pieza de una cadena que se ve desde tres sitios distintos y ninguno la nombraba: falta
+# el .fs-test-env.env → falta el test.conf renderizado → podman crea un directorio → 403.
+_esc=""; [ "$PERMITIR_PRINCIPAL" = 1 ] && _esc=" --en-el-principal"
+for _pieza in test.conf service.yaml; do
+    if [ -d "$OUT_DIR/$_pieza" ]; then
+        cat >&2 <<FIN
+ERROR: «$OUT_DIR/$_pieza» es un DIRECTORIO, y ahí tiene que ir un fichero.
+
+  No lo has creado tú: lo crea el motor de contenedores al montar un bind sobre un fichero que aún
+  no existía, y pasa cuando el stack se levanta ANTES de generar esta configuración.
+
+  Mientras siga siendo un directorio, el sitio de apache del runner no carga y la web contesta un
+  403 que no dice nada de esto.
+
+  Arreglo, con el stack de este proyecto abajo para que no lo vuelva a crear:
+
+      rmdir "$OUT_DIR/$_pieza"
+      $0$_esc
+FIN
+        exit 1
+    fi
+done
 
 # valores previos (si ya existe el generado) como defaults
 # shellcheck disable=SC1090
@@ -113,7 +199,33 @@ FS_CORE_DIR="${FS_CORE_DIR:-$(maq core_dir)}"
 # (B) DERIVADO de lo que ya está versionado — no se pregunta ni se guarda
 FS_CORE_DIR="${FS_CORE_DIR:-$( [ -d "$FS_PROJECT_ROOT/src/Core" ] && echo src || echo . )}"
 eval "$(registro_compose "$FS_PROJECT_ROOT" | sed 's/^\([A-Z_]*\)=\(.*\)$/\1="\2"/')"
-TEST_DB="$(registro_db_test "$FS_PROJECT_ROOT" "$FS_CORE_DIR")"
+# SI ESTO NO SE PUEDE DERIVAR, SE DICE. Antes moría aquí en silencio: `registro_db_test` devuelve
+# rc 1 cuando no hay de dónde sacar el nombre y, con `set -e`, el script se iba con rc 1 y CERO
+# salida — «ni funciona ni lo dice», que es el patrón que este arnés ya persiguió en el warm-up y en
+# el runner web. Medido sobre un proyecto sin `src/config.php`: rc 1, longitud de la salida 0.
+#
+# Y el comentario de abajo lo delata sin querer: dice que «la guarda del TEST_DB es la que sí es
+# obligatoria», y esa guarda (`registro_guarda_db`) está setenta líneas más adelante — a la que
+# nunca se llegaba, porque el script moría antes de poder ejecutarla.
+TEST_DB="$(registro_db_test "$FS_PROJECT_ROOT" "$FS_CORE_DIR" || true)"
+if [ -z "$TEST_DB" ]; then
+    cat >&2 <<FIN
+ERROR: no puedo derivar el nombre de la base de pruebas de «$FS_PROJECT_ROOT».
+
+  Sale de la base de TRABAJO que declara el core del proyecto, añadiéndole «_test»: se lee
+  FS_DB_NAME de $FS_PROJECT_ROOT/$FS_CORE_DIR/config.php. Aquí no hay de dónde sacarlo.
+
+  Suele ser una de tres:
+    · el proyecto todavía no tiene config.php generado (en Mesa/FS lo hace bin/generar-config.sh);
+    · FS_CORE_DIR apunta al sitio equivocado (ahora vale «$FS_CORE_DIR»);
+    · no es una instalación de FacturaScripts.
+
+  No se deriva a un nombre por defecto a propósito: una base de pruebas con un nombre inventado
+  es una base que nadie reconoce como suya, y el aislamiento de este arnés se apoya justo en que
+  el nombre salga de la instalación.
+FIN
+    exit 1
+fi
 # Lo derivado puede NO estar: un compose sin router de traefik —local, o con docker— no da host ni
 # URL, y con `set -u` eso mataba al generador justo al escribir. Se dejan vacías, que es lo que
 # significan: «esta instalación no tiene eso». La guarda del TEST_DB es la que sí es obligatoria.

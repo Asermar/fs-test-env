@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Batería de la GUARDA DEL PROVISIONADOR: el entorno de test vive en una copia,
-# no en el checkout principal.
+# Batería de la GUARDA DEL ANCLA: el entorno de test vive en una copia, no en el
+# checkout principal — y eso lo tienen que aplicar los TRES scripts que pueden
+# montarlo: `test-env-provision.sh`, `init-project.sh` y `up.sh`.
 #
 #   test/provision.sh                 # desde la raíz del arnés
 #   test/provision.sh /ruta/al/arnes  # o diciéndole dónde está
@@ -9,9 +10,13 @@
 # ## POR QUÉ ES UN GUION APARTE Y NO UN BLOQUE DE `test/registro.sh`
 #
 # `registro.sh` comprueba el REGISTRO de instalaciones —herencia, anclas,
-# derivación—; esto comprueba una decisión del PROVISIONADOR, que no lo usa. El
-# único parecido es que las dos son baterías; meterlas juntas obligaría a que la
-# del registro montara repos de git para nada.
+# derivación—; esto comprueba una DECISIÓN sobre el árbol de trabajo. El único
+# parecido es que las dos son baterías; meterlas juntas obligaría a que la del
+# registro montara repos de git para nada.
+#
+# Y por qué los tres scripts se prueban aquí y no en tres ficheros: la fixture
+# cara son los tres árboles de git de abajo, y montarla otra vez para cada uno
+# sería la misma segunda-verdad que la guarda evita en el código.
 #
 # ## QUÉ SE COMPRUEBA Y QUÉ NO
 #
@@ -31,6 +36,15 @@
 #
 # **AUTOCONTENIDA**: monta sus repos de pega en un temporal y lo borra al salir.
 # Sin contenedores, sin base de datos y sin red.
+#
+# ## LO QUE NO CUBRE, Y HAY QUE VERIFICAR A MANO
+#
+# De `up.sh` se comprueba aquí la guarda, la raíz y el mensaje; NO que arranque
+# de verdad ni que su postcondición cace un arranque fallido, porque las dos
+# cosas exigen un motor de contenedores. Se verifican contra una copia real —
+# medido el 29-ago-2026: con el contenedor parado lo deja «running», y contra un
+# contenedor que muere al arrancar sale rc 1 diciendo el estado. «Todo en verde»
+# aquí no acredita que `up.sh` levante nada.
 # =============================================================================
 set -uo pipefail
 
@@ -85,8 +99,80 @@ grep -qF 'no parece un proyecto configurado' <<<"$SAL" && ok "…y sigue hasta l
 printf '\n\033[1;36m— el escape es explícito y RUIDOSO —\033[0m\n'
 SAL="$(corre "$BASE/principal" --en-el-principal)"
 grep -qF 'checkout PRINCIPAL, y el entorno' <<<"$SAL" && mal "sigue rechazando con el flag" || ok "el flag deja pasar"
-grep -qF 'AVISO: provisionando en el checkout PRINCIPAL' <<<"$SAL" && ok "…y AVISA cada vez que se usa" \
+# Se comprueba la parte INVARIANTE del aviso, no la frase entera: desde que la guarda vive en
+# `lib/ancla.sh` cada script dice qué está haciendo («provisionando el entorno de test», «generando
+# la configuración»…), así que fijar el texto completo ataría la batería a uno de los tres.
+grep -qF 'en el checkout PRINCIPAL con --en-el-principal' <<<"$SAL" && ok "…y AVISA cada vez que se usa" \
     || mal "el escape es silencioso"
+grep -qF 'provisionando el entorno de test' <<<"$SAL" && ok "…diciendo QUÉ se está haciendo" \
+    || mal "el aviso no dice qué acción es"
+
+printf '\n\033[1;36m— init-project.sh: la MISMA guarda, en la puerta de la GENERACIÓN —\033[0m\n'
+# Es la puerta por la que entró el caso del 29-ago-2026: generó el `.fs-test-env.env` y el
+# `.fs-test-env/` en el principal de Mesa/FS sin protestar.
+#
+# El registro se desvía a temporales: esta batería NO puede tocar el registro versionado ni el
+# fichero de máquina, y el control negativo de abajo SÍ escribe.
+export REGISTRO_CONF="$BASE/registro.conf" REGISTRO_MAQUINA="$BASE/maquina.conf"
+cp "$T/config/instalaciones.conf" "$REGISTRO_CONF"
+INIT="$T/bin/init-project.sh"
+corre_init() { FS_PROJECT_ROOT="$1" NO_COLOR=1 "$INIT" "${@:2}" </dev/null 2>&1; }
+
+SAL="$(corre_init "$BASE/principal")"; RC=$?
+[ "$RC" -ne 0 ] && ok "en el principal falla (rc $RC)" || mal "genera en el principal"
+grep -qF 'checkout PRINCIPAL' <<<"$SAL" && ok "dice qué pasa" || mal "mensaje mudo"
+grep -qF 'okoworktree add' <<<"$SAL" && ok "…y ofrece la salida EN EL MISMO mensaje" || mal "no dice qué hacer"
+grep -qF -- '--en-el-principal' <<<"$SAL" && ok "…y nombra el escape" || mal "escape no nombrado"
+grep -qF 'DAR DE ALTA EL ANCLA' <<<"$SAL" && ok "…y contempla el caso legítimo: el alta del ancla" \
+    || mal "no dice cómo se da de alta un ancla, que es lo único que sí va en el principal"
+# EL SIMÉTRICO: «se negó» no vale sin comprobar que no dejó nada escrito.
+[ -e "$BASE/principal/.fs-test-env.env" ] && mal "escribió el .env pese a negarse" || ok "y NO escribió el .env"
+[ -e "$BASE/principal/.fs-test-env" ]     && mal "creó .fs-test-env/ pese a negarse" || ok "…ni el .fs-test-env/"
+
+printf '\n\033[1;36m— EL CONTROL NEGATIVO: en un WORKTREE init-project NO se niega —\033[0m\n'
+# Si esto se rompe, se ha apagado la configuración del entorno de toda la casa. Se comprueba por lo
+# que ocurre DESPUÉS: llega a la precondición del TEST_DB, y sólo se llega ahí si la guarda dejó pasar.
+SAL="$(corre_init "$BASE/copia")"
+grep -qF 'checkout PRINCIPAL' <<<"$SAL" && mal "para un worktree legítimo" || ok "deja pasar el worktree"
+grep -qF 'no puedo derivar el nombre de la base' <<<"$SAL" && ok "…y sigue hasta la comprobación siguiente" \
+    || mal "no llegó a la comprobación siguiente: no prueba que pasara la guarda"
+
+printf '\n\033[1;36m— init-project.sh: el escape, y el parseo —\033[0m\n'
+SAL="$(corre_init "$BASE/principal" --en-el-principal)"
+grep -qF 'checkout PRINCIPAL, y generar' <<<"$SAL" && mal "sigue rechazando con el flag" || ok "el flag deja pasar"
+grep -qF 'en el checkout PRINCIPAL con --en-el-principal' <<<"$SAL" && ok "…y AVISA" || mal "el escape es silencioso"
+SAL="$(corre_init "$BASE/principal" --en-el-princiapl)"; RC=$?
+[ "$RC" -ne 0 ] && ok "un typo del escape FALLA (rc $RC) en vez de ignorarse" || mal "un typo se ignora: el rechazo se saltaría solo"
+
+printf '\n\033[1;36m— up.sh: la MISMA guarda, en la puerta del CONTENEDOR —\033[0m\n'
+# Es la puerta que más importa: lo que levanta es un contenedor que autoprovisiona.
+UP="$T/bin/up.sh"
+corre_up() { FS_PROJECT_ROOT="$1" NO_COLOR=1 "$UP" "${@:2}" 2>&1; }
+SAL="$(corre_up "$BASE/principal")"; RC=$?
+[ "$RC" -ne 0 ] && ok "en el principal falla (rc $RC)" || mal "levanta en el principal"
+grep -qF 'checkout PRINCIPAL' <<<"$SAL" && ok "dice qué pasa" || mal "mensaje mudo"
+grep -qF 'okoworktree add' <<<"$SAL" && ok "…y ofrece la salida" || mal "no dice qué hacer"
+# Y que se niegue ANTES de tocar el motor: si hablara del compose es que siguió adelante.
+grep -qF 'no se encuentra el fichero compose' <<<"$SAL" && mal "llegó a buscar el compose: la guarda va tarde" \
+    || ok "…y se niega ANTES de tocar nada del motor"
+
+printf '\n\033[1;36m— EL CONTROL NEGATIVO de up.sh: en un WORKTREE no se niega —\033[0m\n'
+SAL="$(corre_up "$BASE/copia")"
+grep -qF 'checkout PRINCIPAL' <<<"$SAL" && mal "para un worktree legítimo" || ok "deja pasar el worktree"
+grep -qF 'no se encuentra el fichero compose' <<<"$SAL" && ok "…y sigue hasta la búsqueda del compose" \
+    || mal "no llegó a buscar el compose: no prueba que pasara la guarda"
+grep -qF "Raíz en la que he buscado: $BASE/copia" <<<"$SAL" && ok "…diciendo la RAÍZ en la que buscó" \
+    || mal "no dice la raíz: un fallo de derivación se leería como falta de configuración"
+
+printf '\n\033[1;36m— up.sh en una COPIA no crea el contenedor del ORIGINAL —\033[0m\n'
+# El compose declara los container_name SIN sufijo: crearlo desde aquí levantaría el del original
+# montando el árbol de la copia. Pasó, y dejó un huérfano ocupando el router del entorno principal.
+mkdir -p "$BASE/copia/podman" && printf 'services:\n  t:\n    container_name: pega-test\n' > "$BASE/copia/podman/podman-compose.yaml"
+SAL="$(TESTENV_CONTAINER=zz-no-existe-jamas corre_up "$BASE/copia")"; RC=$?
+[ "$RC" -ne 0 ] && ok "no lo crea: falla (rc $RC)" || mal "crea el contenedor del original desde una copia"
+grep -qF 'okoworktree up' <<<"$SAL" && ok "…y delega en quien sabe del overlay" || mal "no dice quién sí puede"
+grep -qF 'del ORIGINAL' <<<"$SAL" && ok "…explicando por qué no lo hace él" || mal "no explica el riesgo"
+rm -rf "$BASE/copia/podman"
 
 printf '\n\033[1;36m— el PARSEO: --recrear-bd se acepta, lo desconocido se RECHAZA —\033[0m\n'
 # Que `--recrear-bd` se acepta se comprueba por lo que ocurre DESPUÉS, igual que arriba con la
