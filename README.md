@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.3.1-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.4.0-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -447,6 +447,31 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.4.0 — El registro sabe dar de baja, y se pregunta por ruta
+
+- **3.4.0** — **Faltaba la simétrica de `registro_maquina_guarda`.** La entrada la escribe
+  `init-project.sh` al configurar una copia y **no la borraba nadie** al retirarla, así que el fichero
+  de máquina acumulaba instalaciones muertas: medido el 30-ago-2026, **cuatro bloques huérfanos** de
+  copias retiradas días antes. Ahora hay `registro_maquina_borra <id>`, el mismo `awk` que ya usa
+  `guarda` para reescribir un bloque, sin el añadido final.
+- **3.4.0** — **Devuelve 1 si el id no estaba**, y esa distinción es lo que hace comprobable el
+  borrado: uno que dice lo mismo cuando quita algo y cuando no había nada es indistinguible de uno
+  roto.
+- **3.4.0** — **`registro_maquina_id_por_ruta <ruta>`, que es lo que evita el problema de verdad.**
+  Quien retira una copia sabe su **directorio**, no su id. Derivarlo obligaría a repetir la regla de
+  `registro_id_de` —con su override `FS_TEST_ID` y su `REGISTRO_DEV_ROOT`— fuera de este repo, y una
+  segunda copia de esa regla se desincroniza en silencio y acaba borrando el bloque equivocado.
+- **3.4.0** — Y de paso vuelve **estructural** una guarda que si no habría que escribir y recordar:
+  sólo puede encontrarse el bloque cuyo `repo_path` es el del directorio que se retira, así que **el
+  ancla del proyecto no puede salir por ahí**. La raíz principal no se puede quitar, y no porque se
+  compare su nombre con nada.
+- **3.4.0** — Seis comprobaciones más en la batería (22 → 28), con el caso que de verdad muerde: el id
+  del ancla es **prefijo** del de todas sus copias (`mesa-fs` ⊂ `mesa-fs-wt-colorbox`), así que un
+  borrado por coincidencia parcial se las llevaría por delante.
+
+> **Quien lo consume vive en `Tooling/Scripts`**: `okoworktree remove` da de baja la copia al
+> retirarla, con dependencia blanda —sin este arnés no hay registro que limpiar y no falta nada—.
 
 ### 3.3.1 — La guarda pregunta de quién es el contenedor, no sólo dónde estoy
 
