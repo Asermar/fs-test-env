@@ -100,6 +100,39 @@ genera mesa-fs-wt-sinrouter "$BASE/c6" >/dev/null; RC=$?
 [ "$RC" -eq 0 ] && ok "sale 0 con un compose sin traefik" || mal "muere sin router (rc $RC)"
 [ -z "$(valor "$BASE/c6" TEST_WEB_URL)" ] && ok "…y deja vacío lo que no puede derivar" || mal "se inventó una URL"
 
+printf '\n\033[1;36m— dar de baja del fichero de máquina —\033[0m\n'
+# La simétrica de `guarda` no existía, y por eso el fichero acumulaba instalaciones muertas: la
+# entrada la escribe `init-project.sh` al configurar una copia y no la borraba nadie al retirarla.
+# Medido el 30-ago-2026: cuatro bloques huérfanos. Se prueba en las dos direcciones —que quita lo
+# suyo y que NO se lleva lo ajeno—, porque un borrado por bloques falla siempre hacia el mismo lado.
+M="$BASE/baja.conf"
+( export REGISTRO_MAQUINA="$M"
+  source "$T/bin/lib/registro.sh"
+  registro_maquina_guarda uno  repo_path=/a core_dir=src
+  registro_maquina_guarda dos  repo_path=/b core_dir=src
+  registro_maquina_guarda tres repo_path=/c core_dir=src )
+
+( export REGISTRO_MAQUINA="$M"; source "$T/bin/lib/registro.sh"; registro_maquina_borra dos )
+tiene "$M" dos && mal "el bloque borrado sigue ahí" || ok "quita el bloque que se le pide"
+tiene "$M" uno && tiene "$M" tres && ok "…y deja intactos los demás" || mal "se llevó bloques ajenos"
+[ "$(grep -c 'repo_path' "$M")" -eq 2 ] && ok "…con sus datos, no sólo la cabecera" || mal "perdió claves de los que quedan"
+
+# Distinguir «no había nada» de «lo he quitado» es lo que hace comprobable el borrado: si dijera lo
+# mismo en los dos casos, sería indistinguible de una función que no hace nada.
+( export REGISTRO_MAQUINA="$M"; source "$T/bin/lib/registro.sh"; registro_maquina_borra inexistente ) \
+    && mal "sale 0 con un id que no está" || ok "sale 1 con un id que no está"
+
+# El caso que de verdad muerde: el id del ancla es PREFIJO del de todas sus copias
+# (`mesa-fs` ⊂ `mesa-fs-wt-colorbox`), así que un borrado por coincidencia parcial se las llevaría.
+( export REGISTRO_MAQUINA="$M"
+  source "$T/bin/lib/registro.sh"
+  registro_maquina_guarda mesa-fs              repo_path=/x core_dir=src
+  registro_maquina_guarda mesa-fs-wt-colorbox  repo_path=/y core_dir=src
+  registro_maquina_borra  mesa-fs >/dev/null )
+tiene "$M" mesa-fs-wt-colorbox && ok "borrar el ancla NO se lleva sus copias (el id es prefijo)" \
+    || mal "se llevó la copia al borrar el ancla"
+tiene "$M" mesa-fs && mal "el ancla sigue ahí" || ok "…y el ancla sí se fue"
+
 printf '\n'
 [ "$FALLOS" -eq 0 ] && { printf '\033[1;32m%s comprobaciones, todas en verde.\033[0m\n' "$OK"; exit 0; }
 printf '\033[1;31m%s en verde, %s FALLIDAS.\033[0m\n' "$OK" "$FALLOS"; exit 1
