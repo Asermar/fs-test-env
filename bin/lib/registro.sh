@@ -215,3 +215,50 @@ CAB
     mv "$tmp" "$f"
     chmod 600 "$f"
 }
+
+# --- (A ter) el fichero de máquina: QUIÉN es la instalación de esta ruta -----
+# Devuelve el id del bloque cuyo `repo_path` es exactamente esa ruta, o vacío.
+#
+# Existe para que quien retira una copia NO tenga que derivar el id: derivarlo obliga a repetir la
+# regla de `registro_id_de` —con su override `FS_TEST_ID` y su `REGISTRO_DEV_ROOT`— fuera de este
+# repo, y una segunda copia de esa regla se desincroniza en silencio y acaba borrando el bloque
+# equivocado. Aquí se pregunta por un dato que el que retira YA tiene: el directorio.
+#
+# Y de paso hace ESTRUCTURAL una guarda que si no habría que escribir: sólo puede encontrarse el
+# bloque que apunta al directorio que se está retirando, así que **el ancla del proyecto —cuyo
+# `repo_path` es la raíz principal, no la copia— no puede salir nunca por aquí**. La raíz principal
+# no se puede quitar por este camino, y no porque se compare su nombre con algo.
+registro_maquina_id_por_ruta() {  # <ruta>
+    local ruta="${1:?falta la ruta}" f="$REGISTRO_MAQUINA"
+    [ -f "$f" ] || return 1
+    ruta="$(cd "$ruta" 2>/dev/null && pwd)" || ruta="$1"
+    awk -v ruta="$ruta" '
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*\[/ { id = $0; gsub(/^[[:space:]]*\[|\][[:space:]]*$/, "", id); next }
+        /^[[:space:]]*repo_path[[:space:]]*=/ {
+            v = $0; sub(/^[^=]*=[[:space:]]*/, "", v); gsub(/[[:space:]]*$/, "", v)
+            if (v == ruta && id != "") { print id; exit }
+        }' "$f"
+}
+
+# --- (A bis) el fichero de máquina: DAR DE BAJA una entrada ------------------
+# Simétrica de `guarda`: quita el bloque entero del id y deja el resto del fichero intacto — mismo
+# `awk`, sin el añadido final.
+#
+# Existe porque NO existía, y se notaba: la entrada la escribe `init-project.sh` al configurar una
+# copia, y al retirarla no la borraba nadie. Medido el 30-ago-2026: cuatro bloques huérfanos de
+# copias retiradas días antes, uno de ellos de una copia borrada esa misma tarde.
+#
+# **Devuelve 1 si el id no estaba**, y esa distinción es el motivo de que se pueda comprobar: un
+# borrado que dice lo mismo cuando quita algo y cuando no había nada es indistinguible de uno roto.
+registro_maquina_borra() {  # <id>
+    local id="${1:?falta el id}" f="$REGISTRO_MAQUINA" tmp
+    [ -f "$f" ] || return 1
+    grep -qE "^[[:space:]]*\[$id\][[:space:]]*$" "$f" || return 1
+    tmp="$(mktemp)"
+    awk -v id="[$id]" 'BEGIN{dentro=0}
+        /^[[:space:]]*\[/ { dentro = ($0 ~ "^[[:space:]]*\\" id "[[:space:]]*$") }
+        !dentro { print }' "$f" > "$tmp"
+    mv "$tmp" "$f"
+    chmod 600 "$f"
+}
