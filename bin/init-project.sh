@@ -198,7 +198,24 @@ FS_CORE_DIR="${FS_CORE_DIR:-$(maq core_dir)}"
 
 # (B) DERIVADO de lo que ya está versionado — no se pregunta ni se guarda
 FS_CORE_DIR="${FS_CORE_DIR:-$( [ -d "$FS_PROJECT_ROOT/src/Core" ] && echo src || echo . )}"
-eval "$(registro_compose "$FS_PROJECT_ROOT" | sed 's/^\([A-Z_]*\)=\(.*\)$/\1="\2"/')"
+# LA IDENTIDAD DE UNA COPIA ES SUYA, y sale de la señal de git — no del nombre de la carpeta.
+#
+# Sin esto, lo derivado del compose salía con los nombres del ORIGINAL: el compose los declara con
+# `${STACK_SUFFIX:-}` dentro y `registro_compose` borraba esa interpolación. Ver su cabecera, que
+# lleva el porqué y la medición.
+#
+# `ancla_es_worktree` en vez de «¿tiene `-wt-` en el nombre?» por lo que `lib/ancla.sh` ya razona: un
+# nombre falla en las dos direcciones —un worktree creado a mano sin la convención se quedaría sin su
+# identidad, y una carpeta llamada `-wt-falso` que es un repo normal se llevaría una que no le toca—.
+# Y el guion va DENTRO del valor, como en `STACK_SUFFIX`.
+#
+# EN EL PRINCIPAL SALE VACÍO, y eso es lo que no se puede romper: `--en-el-principal` es el único
+# camino para dar de alta el ancla de un proyecto, y un ancla con sufijo no sería el ancla de nadie.
+# El escape salta la guarda, no cambia esta derivación: aquí decide git, no el flag.
+STACK_SUFFIX_COPIA=""
+ancla_es_worktree "$FS_PROJECT_ROOT" && \
+    STACK_SUFFIX_COPIA="-$(ancla_sufijo_copia "$FS_PROJECT_ROOT")"
+eval "$(registro_compose "$FS_PROJECT_ROOT" "$STACK_SUFFIX_COPIA" | sed 's/^\([A-Z_]*\)=\(.*\)$/\1="\2"/')"
 # SI ESTO NO SE PUEDE DERIVAR, SE DICE. Antes moría aquí en silencio: `registro_db_test` devuelve
 # rc 1 cuando no hay de dónde sacar el nombre y, con `set -e`, el script se iba con rc 1 y CERO
 # salida — «ni funciona ni lo dice», que es el patrón que este arnés ya persiguió en el warm-up y en
@@ -428,7 +445,7 @@ cat <<EOF
 ================================================================
 Entorno de test configurado (motor: $CONTAINER_ENGINE).
 
-1) La config local ya está ignorada (`.fs-test-env.env` y `.fs-test-env/`):
+1) La config local ya está ignorada («.fs-test-env.env» y «.fs-test-env/»):
      este script la añade al .gitignore, porque el fichero es GENERADO y no debe versionarse.
 
 2) Pega el servicio de $OUT_DIR/service.yaml en tu compose y levántalo:
