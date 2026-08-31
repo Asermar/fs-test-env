@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.4.0-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.4.1-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -447,6 +447,39 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.4.1 — La copia recibe SU identidad, no la del ancla
+
+- **3.4.1** — **`init-project.sh` en una copia escribía la identidad del ORIGINAL.** La causa era una
+  línea: el compose de un cliente declara sus nombres con el sufijo del stack dentro
+  (`lcp-fs${STACK_SUFFIX:-}-test`), y `registro_compose` **borraba** esa interpolación en vez de
+  sustituirla — con el comentario «es de la copia» como si lo resolviera alguien. No lo resolvía
+  nadie: `TESTENV_CONTAINER`, `TESTENV_HOST`, `TEST_WEB_URL` y `TESTENV_TRAEFIK_ROUTER` salían del
+  árbol original. Sólo `TEST_DB` y las rutas salían bien, porque ésas ya se derivaban de la copia.
+- **3.4.1** — **Y no causaba daño por una razón que no es una salvaguarda**: `okoworktree` reescribe
+  esos cuatro valores justo después. O sea que el aislamiento dependía del **orden de llamada**, no de
+  la herramienta que escribe el fichero. Quien siguiera a mano el mensaje de un fallo —que es lo que
+  este arnés invita a hacer— y provisionara a continuación, provisionaba contra el entorno de pruebas
+  del original.
+- **3.4.1** — El sufijo **se recibe, no se deriva** en `registro_compose`: lo pasa quien llama, con
+  `ancla_es_worktree` y `ancla_sufijo_copia` de `lib/ancla.sh`, que es la señal que ya estaba elegida
+  y tiene su porqué escrito. Sin sufijo el comportamiento es el de antes byte a byte, que es lo que
+  mantiene intacto el alta del ancla con `--en-el-principal`.
+- **3.4.1** — **El router de traefik va aparte, y hay que decir por qué**: su nombre es la CLAVE de la
+  etiqueta, y `podman-compose` 1.0.6 interpola valores y `container_name` pero **nunca** claves. Así
+  que en el compose es literal y la sustitución no lo alcanza. Hace falta igual: dos copias que
+  declaren el mismo router se anulan **mutuamente** en traefik y de paso tumban al original.
+- **3.4.1** — **El mensaje final ya no se come los nombres que explica.** `cat <<EOF` sin comillar el
+  delimitador, con comillas invertidas dentro, así que bash las ejecutaba: salía «La config local ya
+  está ignorada ( y ):» y un `command not found`. No se arregla comillando el delimitador —medido, el cuerpo
+  interpola tres variables en cuatro apariciones, y además lleva un `\$FS_TEST_DIR` escapado a
+  propósito que perdería su escape—: se usan las comillas «» que el resto del repo ya usa. Barrido el repo entero: era la **única** aparición del patrón.
+- **3.4.1** — Trece comprobaciones más en la batería del registro (28 → 41), y es la primera que monta
+  un **worktree de git de verdad**: la señal que distingue una copia de un principal es de git, así
+  que el árbol es la fixture mínima de esa señal y no un añadido. Dos cosas que sólo aparecieron al
+  ejecutarla — un `src/Core` vacío **no viaja** a un worktree (git no versiona directorios vacíos), y
+  un negativo escrito a la ligera («ninguno de los cuatro es el del original») **salía verde solo**
+  cuando el fichero no se generaba.
 
 ### 3.4.0 — El registro sabe dar de baja, y se pregunta por ruta
 

@@ -131,22 +131,69 @@ registro_db_test() { local w; w="$(registro_db_trabajo "$@")"; [ -n "$w" ] && pr
 
 # Del compose: el servicio de test es el que tiene un `container_name` acabado en
 # `-test`; de su etiqueta de traefik salen el router y el host.
-registro_compose() {  # <raíz> → imprime CLAVE=valor de lo derivable
-    local raiz="$1" c
+#
+# ## EL SEGUNDO ARGUMENTO ES LA IDENTIDAD DE LA COPIA, y su ausencia era un defecto
+#
+# El compose de un cliente declara sus nombres con el sufijo del stack DENTRO
+# (`lcp-fs${STACK_SUFFIX:-}-test`), porque es la única forma de que una copia levante contenedores
+# con nombre propio: `podman-compose` interpola valores, así que ahí sí entra.
+#
+# Aquí se **BORRABA** esa interpolación en vez de sustituirla, con el comentario «es de la copia»
+# como si eso lo resolviera alguien. No lo resolvía nadie: en una copia salían los nombres del
+# ORIGINAL. Medido el 30-ago-2026 sobre una copia real de un cliente — contenedor, host, URL y
+# router, los cuatro del árbol original.
+#
+# Y NO CAUSABA DAÑO POR UNA RAZÓN QUE NO ES UNA SALVAGUARDA: `okoworktree` reescribe esos cuatro
+# valores justo después de llamar a este generador. O sea que el aislamiento dependía del **orden de
+# llamada**, no de la herramienta que escribe el fichero. Quien siguiera a mano el mensaje de un
+# fallo —que es lo que el arnés invita a hacer— y provisionara a continuación, provisionaba contra el
+# entorno de pruebas del ORIGINAL.
+#
+# EL SUFIJO SE RECIBE, NO SE DERIVA AQUÍ. Lo deriva quien llama, con `ancla_es_worktree` y
+# `ancla_sufijo_copia` de `lib/ancla.sh`, que es la señal que la casa ya eligió y tiene su porqué
+# escrito. Así este fichero no gana una dependencia de esa librería y el test puede pedirle las dos
+# respuestas —con sufijo y sin él— sin montar un worktree para cada una.
+#
+# EL GUION VA DENTRO DEL VALOR, igual que en `STACK_SUFFIX`: el compose escribe
+# `lcp-fs${STACK_SUFFIX:-}-test`, así que lo que se sustituye es `-<sufijo>` y no `<sufijo>`. Es la
+# misma convención que `Scripts/lib/okoworktree/kinds/facturascripts.sh` declara al generar el `.env`
+# de la copia, y desviarse de ella daría un nombre que no existe en ningún sitio.
+#
+# VACÍO = COMO ANTES, byte a byte: fuera de una copia no hay sufijo que poner, y borrar la
+# interpolación es entonces la respuesta correcta.
+registro_compose() {  # <raíz> [<valor de STACK_SUFFIX>] → imprime CLAVE=valor de lo derivable
+    local raiz="$1" suf="${2:-}" c
     c="$(find "$raiz" -maxdepth 3 \( -name 'podman-compose*.y*ml' -o -name 'docker-compose*.y*ml' \) -print -quit 2>/dev/null)"
     [ -n "$c" ] || return 0
-    awk '
+    awk -v suf="$suf" '
+        # Un `&` en el reemplazo de `sub`/`gsub` significa «lo que casó», así que un sufijo con `&`
+        # insertaría el nombre entero. Se neutraliza una vez, aquí, y no en los tres usos de abajo.
+        BEGIN { gsub(/&/, "\\&", suf) }
         /^  [a-zA-Z0-9_-]+:[[:space:]]*$/ { svc = $1; sub(":", "", svc) }
         /container_name:/ {
             nombre = $2
-            gsub(/\$\{[^}]*\}/, "", nombre)          # `${STACK_SUFFIX:-}` fuera: es de la copia
+            gsub(/\$\{[^}]*\}/, suf, nombre)         # la identidad de ESTA copia, no la del ancla
             if (nombre ~ /-test$/) { print "TESTENV_SERVICE=" svc; print "TESTENV_CONTAINER=" nombre }
             if (nombre ~ /-db$/)   { print "TESTENV_DB_SERVICE=" svc }
         }
         /routers\.[a-zA-Z0-9_-]+-test\.rule=Host\(/ {
             if (!visto_router) {
-                r = $0; sub(/^.*routers\./, "", r); sub(/\.rule.*$/, "", r); print "TESTENV_TRAEFIK_ROUTER=" r
-                h = $0; sub(/^.*Host\(`/, "", h); sub(/`.*$/, "", h); gsub(/\$\{[^}]*\}/, "", h)
+                r = $0; sub(/^.*routers\./, "", r); sub(/\.rule.*$/, "", r)
+                # EL ROUTER NO SE ARREGLA POR INTERPOLACIÓN, y hay que decir por qué: su nombre es la
+                # CLAVE de la etiqueta, y `podman-compose` 1.0.6 interpola valores y `container_name`
+                # pero NUNCA claves. Así que en el compose es literal —`propkey-test`— y la
+                # sustitución de arriba no lo alcanza: se sufija aparte.
+                #
+                # Y hace falta, no es simetría: dos copias que declaren el mismo router se anulan
+                # MUTUAMENTE en traefik y de paso tumban al original, que es la primera trampa que el
+                # `CLAUDE.md` global tiene escrita sobre dos copias del mismo stack.
+                #
+                # A una copia enrutada por `okoworktree` la sirve su file provider, con un nombre que
+                # okoworktree elige; esto gobierna el `service.yaml` que se renderiza aquí, que es lo
+                # que pega quien monta el servicio a mano.
+                if (suf != "") sub(/-test$/, suf "-test", r)
+                print "TESTENV_TRAEFIK_ROUTER=" r
+                h = $0; sub(/^.*Host\(`/, "", h); sub(/`.*$/, "", h); gsub(/\$\{[^}]*\}/, suf, h)
                 print "TESTENV_HOST=" h; print "TEST_WEB_URL=https://" h
                 visto_router = 1
             }
