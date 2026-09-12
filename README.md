@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.4.1-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.4.2-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -447,6 +447,16 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.4.2 — El catálogo conoce el ancla de Segur
+
+- **3.4.2** — **Alta de `[segur-fs]` en `config/instalaciones.conf`**, la entrada de la que derivan su
+  configuración de producto las copias de ese proyecto. Deja escritas dos particularidades que no se
+  deducen del repo y que costarían un rato averiguar: el checkout principal **no** monta entorno de
+  test —el desarrollo va en worktrees—, y su core va **por detrás**, así que el entorno de pruebas se
+  clona en ese tag y no en la línea actual del core. Sin esa segunda línea, quien lo monte por
+  primera vez clonaría de la punta y se encontraría un comportamiento distinto del de la instalación
+  real, sin ningún error que lo delate.
 
 ### 3.4.1 — La copia recibe SU identidad, no la del ancla
 
