@@ -4,6 +4,9 @@
 # checkout principal — y eso lo tienen que aplicar los TRES scripts que pueden
 # montarlo: `test-env-provision.sh`, `init-project.sh` y `up.sh`.
 #
+# Y al final, una comprobación que NO es de la guarda y vive aquí por la misma razón que las otras
+# tres —la fixture cara ya está montada—: de dónde saca `setup-test-env.sh` la raíz del proyecto.
+#
 #   test/provision.sh                 # desde la raíz del arnés
 #   test/provision.sh /ruta/al/arnes  # o diciéndole dónde está
 #
@@ -225,6 +228,53 @@ grep -qF -- '--recrear-bd' <<<"$SAL" && ok "…y enseña el que sí existe" || m
 SAL="$(corre "$BASE/principal" --en-el-principal)"
 grep -qF 'opción desconocida' <<<"$SAL" && mal "el parseo estricto se comió --en-el-principal" \
     || ok "y --en-el-principal sigue aceptándose"
+
+printf '\n\033[1;36m— setup-test-env.sh: DE DÓNDE SALE LA RAÍZ DEL PROYECTO —\033[0m\n'
+# El cuarto script que puede acabar montando el entorno (delega en `test-env-provision.sh`) derivaba
+# la raíz de SU PROPIA POSICIÓN —`$SCRIPT_DIR/../..`—, que era el proyecto cuando `bin/` colgaba de
+# él y desde que el arnés vive en `~/Dev/Tooling/fs-test` resuelve a `Tooling`: la carpeta de las
+# herramientas, que no es el proyecto de nadie. Ahora se deriva del repositorio en el que estás,
+# igual que `init-project.sh` y `up.sh`.
+#
+# SE COMPRUEBA POR EL CAMINO QUE FALLA, y es a propósito: el mensaje de «no existe src/config.php»
+# IMPRIME la raíz que se usó, así que una fixture SIN ese fichero delata la derivación sin entrar en
+# el modo interactivo del script ni pedirle nada a la red. Lo que la comprobación tiene que poder
+# cazar es que la raíz vuelva a salir del arnés, y eso se ve aquí.
+SETUP="$T/bin/setup-test-env.sh"
+git init -q "$BASE/proy"; mkdir -p "$BASE/proy/sub/dir"
+# Las dos ramas van explícitas y NO con `${2:+FS_PROJECT_ROOT=...}`: un prefijo de asignación se
+# reconoce al PARSEAR, y esa expansión ocurre después, así que bash tomaba el texto como el nombre del
+# comando y el script no llegaba a ejecutarse. La comprobación de al lado pasaba entonces en vacío.
+corre_setup() {
+    local dir="$1" raiz="${2:-}"
+    if [ -n "$raiz" ]; then ( cd "$dir" && NO_COLOR=1 FS_PROJECT_ROOT="$raiz" bash "$SETUP" </dev/null 2>&1 )
+    else                    ( cd "$dir" && NO_COLOR=1                          bash "$SETUP" </dev/null 2>&1 ); fi
+}
+
+SAL="$(corre_setup "$BASE/proy/sub/dir")"
+grep -qF "Raíz del proyecto usada: $BASE/proy" <<<"$SAL" \
+    && ok "desde un subdirectorio, la raíz es la del REPO en el que estás" \
+    || mal "la raíz no es la del repo: $(grep -F 'Raíz del proyecto' <<<"$SAL")"
+# El negativo que de verdad importa: que no haya vuelto a salir de donde vive el arnés.
+grep -qF "Raíz del proyecto usada: $(cd "$T/.." && pwd)" <<<"$SAL" \
+    && mal "la raíz vuelve a derivarse de la posición del arnés" \
+    || ok "…y NO de la carpeta que contiene el arnés"
+
+SAL="$(corre_setup "$BASE")"          # $BASE no es un repo: no hay toplevel que preguntar
+grep -qF 'No la has dicho' <<<"$SAL" \
+    && ok "fuera de un repo dice que la raíz se derivó sola" \
+    || mal "no distingue una raíz derivada de una dicha"
+grep -qF 'FS_PROJECT_ROOT=/ruta/del/proyecto' <<<"$SAL" \
+    && ok "…y dice cómo decirla, que es lo único accionable" \
+    || mal "no dice cómo arreglarlo"
+
+SAL="$(corre_setup "$BASE/proy" "$BASE/no-existe")"
+grep -qF 'La has dado tú' <<<"$SAL" \
+    && ok "si la raíz la dijo quien invoca, el mensaje lo dice" \
+    || mal "trata una raíz explícita como si la hubiera derivado él"
+grep -qF 'lánzalo desde la raíz' <<<"$SAL" \
+    && mal "manda al arreglo equivocado: la raíz la había dicho quien invoca" \
+    || ok "…y no le manda a cambiarse de directorio, que no arreglaría nada"
 
 printf '\n'
 [ "$FALLOS" -eq 0 ] && { printf '\033[1;32m%s comprobaciones, todas en verde.\033[0m\n' "$OK"; exit 0; }
