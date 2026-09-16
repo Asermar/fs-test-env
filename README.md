@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.4.2-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.4.3-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -277,7 +277,7 @@ rota — está diciendo que ese flag no significa lo que crees.
 **`test/registro.sh`** — comprueba el **registro de instalaciones**: que una copia hereda la
 configuración de producto de su ancla, que una instalación nueva de verdad sigue preguntando, que una
 copia sin ancla falla en vez de registrarse, y que las guardas de la base de test siguen viendo a las
-copias. **22 comprobaciones, en torno a un segundo.**
+copias. **41 comprobaciones, unos 3 s.**
 
 > **Y antes de tocar nada se pregunta DE QUIÉN es el contenedor, no sólo dónde estamos.** Saber que
 > estás en una copia dice dónde estás, no a quién pertenece lo que vas a arrancar: si el
@@ -307,7 +307,7 @@ Y, aparte de la guarda, **de dónde saca `setup-test-env.sh` la raíz del proyec
 repositorio en el que estás —no de dónde vive el arnés, que es `Tooling` y no el proyecto de nadie— y
 que, cuando no la encuentra, el mensaje **distingue si la raíz la dijiste tú o se derivó sola**, que
 es lo que decide cuál es el arreglo. Se comprueba por el camino que falla, así que no entra en el
-modo interactivo ni toca la red. **53 comprobaciones, ~0,4 s.**
+modo interactivo ni toca la red. **53 comprobaciones, unos 7 s.**
 
 **`test/teardown.sh`** — comprueba que **`--keep-db` se retiró y pasarlo falla sin borrar nada**, y
 que la raíz del proyecto sale del directorio actual. Lleva su **control positivo** —la invocación sin
@@ -453,6 +453,34 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.4.3 — La raíz del proyecto sale del repo en el que estás
+
+- **3.4.3** — **`setup-test-env.sh` deriva la raíz del proyecto del repositorio en el que estás**, no
+  de dónde vive el arnés. La derivación anterior (`$SCRIPT_DIR/../..`) era el proyecto cuando `bin/`
+  colgaba de él; desde que el arnés vive fuera resuelve a la carpeta que lo contiene —`Tooling`—, que
+  no es el proyecto de nadie. Era el **único de los cinco** scripts que derivan `FS_PROJECT_ROOT` que
+  seguía haciéndolo así: `init-project.sh` y `up.sh` ya derivaban del repositorio y los dos
+  `test-env-*` del directorio actual, o sea que esto **termina una migración que se dejó un fichero**.
+- **3.4.3** — **Y no rompía nada hoy por una razón que no es una salvaguarda**: quien invoca el script
+  le pasa `FS_PROJECT_ROOT` —`okoworktree` lo hace en sus dos llamadas—, así que el default estaba
+  **muerto sin que nadie lo notara**. Lo que fallaba era el camino que nadie recorría, que es
+  exactamente el que recorre quien sigue a mano el mensaje de un fallo.
+- **3.4.3** — **El error de «no existe `src/config.php`» dice ahora de dónde salió la raíz y quién la
+  puso**: si se derivó sola, cómo decirla; si la dio quien invoca, que la revise — y no le manda a
+  cambiarse de directorio, que no arreglaría nada. Antes el mensaje era **cierto y no decía lo único
+  accionable**.
+- **3.4.3** — `test/provision.sh` cubre también de dónde sale la raíz en `setup-test-env.sh`, que era
+  el cuarto script capaz de acabar montando el entorno y el único sin red (47 → **53
+  comprobaciones**). Se comprueba **por el camino que falla** —el error imprime la raíz usada—, así
+  que no entra en el modo interactivo ni toca la red. Las seis nuevas están probadas con **dos
+  mutaciones**: devolver la derivación a la posición del arnés pone 2 en rojo, y quitar la distinción
+  del mensaje otras 2.
+- **3.4.3** — **Tres cifras del propio README que no eran ciertas**, medidas al publicar y corregidas
+  aquí: `test/registro.sh` declaraba **22 comprobaciones** y son **41**; y los tiempos de las dos
+  baterías grandes («en torno a un segundo» y «~0,4 s») se quedaron en **unos 3 s** y **unos 7 s**,
+  este último porque las comprobaciones nuevas de esta misma versión ejecutan el script real. Un
+  recuento que miente por 19 comprobaciones es justo lo que este arnés existe para no hacer.
 
 ### 3.4.2 — El catálogo conoce el ancla de Segur
 
