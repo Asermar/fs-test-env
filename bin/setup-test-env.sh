@@ -19,7 +19,14 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
+FS_PROJECT_ROOT_EXPLICITA="${FS_PROJECT_ROOT:+si}"   # se anota ANTES de derivar: después ya no se distingue
+# La raíz del PROYECTO no se deduce de dónde vive el arnés, y aquí se deducía: `$SCRIPT_DIR/../..`
+# era el proyecto cuando `bin/` colgaba de él, y desde que el arnés vive fuera (`~/Dev/Tooling/fs-test`)
+# resuelve a `Tooling`, que no es el proyecto de nadie. Se deriva del REPOSITORIO en el que estás
+# —igual que `init-project.sh` y `up.sh`, y por su mismo motivo: es lo que no se rompe al mudar nada—
+# y, si eso no dice nada útil, del directorio actual. `FS_PROJECT_ROOT` sigue mandando sobre todo, que
+# es como lo invoca `okoworktree` para cada copia.
+FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || echo "$PWD")}"
 [ -f "$FS_PROJECT_ROOT/.fs-test-env.env" ] && . "$FS_PROJECT_ROOT/.fs-test-env.env"
 
 FS_CORE_DIR="${FS_CORE_DIR:-src}"
@@ -50,7 +57,21 @@ log_ok()   { printf '%s[%s] OK %s%s\n' "$C_OK" "$(date +%H:%M:%S)" "$*" "$C_RESE
 for bin in git composer php; do
     command -v "$bin" >/dev/null 2>&1 || { echo "ERROR: falta '$bin' en el sistema." >&2; exit 1; }
 done
-[ -f "$SRC_CONFIG" ] || { echo "ERROR: no existe $SRC_CONFIG" >&2; exit 1; }
+# Falla NOMBRANDO LA CAUSA, no sólo el fichero que falta: cuando la raíz se ha derivado sola, «no
+# existe /ruta/src/config.php» es cierto y no dice lo único que hay que saber —que la raíz no es la
+# que creías y cómo decirla—. Mismo remedio que `init-project.sh` y `up.sh`.
+if [ ! -f "$SRC_CONFIG" ]; then
+    echo "ERROR: no existe $SRC_CONFIG" >&2
+    echo "       Raíz del proyecto usada: $FS_PROJECT_ROOT" >&2
+    if [ -n "${FS_PROJECT_ROOT_EXPLICITA:-}" ]; then
+        echo "       La has dado tú en FS_PROJECT_ROOT; comprueba que apunta al proyecto." >&2
+    else
+        echo "       No la has dicho: se ha derivado del repositorio en el que estás." >&2
+        echo "       Arreglo: lánzalo desde la raíz del proyecto," >&2
+        echo "                o dilo explícitamente: FS_PROJECT_ROOT=/ruta/del/proyecto $0" >&2
+    fi
+    exit 1
+fi
 [ -x "$PROVISION" ] || { echo "ERROR: no existe o no es ejecutable $PROVISION" >&2; exit 1; }
 
 # --- extensiones PHP requeridas por el core (composer + conexión a BD) ---
