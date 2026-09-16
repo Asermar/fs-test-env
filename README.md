@@ -301,7 +301,13 @@ entorno** (`test-env-provision.sh`, `init-project.sh` y `up.sh`): que en el chec
 niegan sin escribir ni levantar nada, que **en un worktree NO se niegan** —el control negativo, que
 es lo que evita apagar el entorno de toda la casa—, que un submódulo sigue contando como principal, y
 que el escape avisa. Y el parseo: que **lo desconocido se rechaza** (incluido el caso que lo motiva,
-un typo `--recrear-db` que antes se ignoraba en silencio). **39 comprobaciones, ~0,3 s.**
+un typo `--recrear-db` que antes se ignoraba en silencio).
+
+Y, aparte de la guarda, **de dónde saca `setup-test-env.sh` la raíz del proyecto**: que sale del
+repositorio en el que estás —no de dónde vive el arnés, que es `Tooling` y no el proyecto de nadie— y
+que, cuando no la encuentra, el mensaje **distingue si la raíz la dijiste tú o se derivó sola**, que
+es lo que decide cuál es el arreglo. Se comprueba por el camino que falla, así que no entra en el
+modo interactivo ni toca la red. **53 comprobaciones, ~0,4 s.**
 
 **`test/teardown.sh`** — comprueba que **`--keep-db` se retiró y pasarlo falla sin borrar nada**, y
 que la raíz del proyecto sale del directorio actual. Lleva su **control positivo** —la invocación sin
