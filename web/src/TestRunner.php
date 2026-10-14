@@ -203,8 +203,35 @@ class TestRunner
         if (!is_resource($process)) {
             return [-1, '', 'No se pudo iniciar: ' . $command];
         }
-        $stdout = stream_get_contents($pipes[1]);
-        $stderr = stream_get_contents($pipes[2]);
+        // Las dos salidas se leen A LA VEZ: leer stdout entero y luego stderr interbloquea en
+        // cuanto el hijo llena el búfer del pipe de stderr (64 KB) antes de cerrar stdout.
+        $stdout = '';
+        $stderr = '';
+        $open = [1 => $pipes[1], 2 => $pipes[2]];
+        foreach ($open as $pipe) {
+            stream_set_blocking($pipe, false);
+        }
+        while ($open) {
+            $read = array_values($open);
+            $write = $except = null;
+            if (stream_select($read, $write, $except, null) === false) {
+                break;
+            }
+            foreach ($open as $fd => $pipe) {
+                if (!in_array($pipe, $read, true)) {
+                    continue;
+                }
+                $chunk = (string)fread($pipe, 65536);
+                if ($fd === 1) {
+                    $stdout .= $chunk;
+                } else {
+                    $stderr .= $chunk;
+                }
+                if (feof($pipe)) {
+                    unset($open[$fd]);
+                }
+            }
+        }
         fclose($pipes[1]);
         fclose($pipes[2]);
         $exit = proc_close($process);
