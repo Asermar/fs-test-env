@@ -314,10 +314,17 @@ que la raíz del proyecto sale del directorio actual. Lleva su **control positiv
 opciones, que sí borra—, porque «no hizo nada» se cumple también con un script que no hace nada
 nunca. **15 comprobaciones.**
 
+**`test/runner.sh`** — comprueba que **el runner web vuelve por mucho que escriba phpunit**: invoca el
+`TestRunner::exec()` real con un hijo que escribe 200 KB por stderr (más que el búfer de un pipe) y
+comprueba que vuelve dentro de un `timeout` y que devuelve lo mismo de siempre —código de salida,
+stdout seguido de stderr, y stderr aparte—. Lleva su **control positivo** con salida pequeña.
+**16 comprobaciones, menos de 1 s.**
+
 ```bash
 test/registro.sh                  # desde la raíz del arnés
 test/provision.sh
 test/teardown.sh
+test/runner.sh
 test/registro.sh /ruta/al/arnes   # o diciéndole dónde está
 ```
 
