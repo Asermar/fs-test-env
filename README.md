@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.4.3-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.4.4-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -314,10 +314,17 @@ que la raíz del proyecto sale del directorio actual. Lleva su **control positiv
 opciones, que sí borra—, porque «no hizo nada» se cumple también con un script que no hace nada
 nunca. **15 comprobaciones.**
 
+**`test/runner.sh`** — comprueba que **el runner web vuelve por mucho que escriba phpunit**: invoca el
+`TestRunner::exec()` real con un hijo que escribe 200 KB por stderr (más que el búfer de un pipe) y
+comprueba que vuelve dentro de un `timeout` y que devuelve lo mismo de siempre —código de salida,
+stdout seguido de stderr, y stderr aparte—. Lleva su **control positivo** con salida pequeña.
+**16 comprobaciones, menos de 1 s.**
+
 ```bash
 test/registro.sh                  # desde la raíz del arnés
 test/provision.sh
 test/teardown.sh
+test/runner.sh
 test/registro.sh /ruta/al/arnes   # o diciéndole dónde está
 ```
 
@@ -453,6 +460,17 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.4.4 — El runner web ya no se cuelga con muchos tests en rojo
+
+- **3.4.4** — **El runner web ya no se queda colgado cuando phpunit escribe mucho por la salida de
+  errores.** Con muchos tests en rojo, `POST ?action=run` no volvía nunca: `TestRunner::exec()` leía
+  stdout entero y sólo después stderr, así que en cuanto phpunit llenaba el búfer del pipe de stderr
+  (64 KB) se quedaba esperando a que alguien lo leyera, mientras el runner seguía esperando a stdout.
+  Ahora lee las dos salidas a la vez, y lo que devuelve no cambia. Reproducido antes de arreglarlo
+  con el `exec()` real: 1 KB de stderr volvía y 200 KB no.
+- **3.4.4** — Batería nueva **`test/runner.sh`** (16 comprobaciones), que reproduce el caso con más de
+  64 KB por stderr dentro de un `timeout`: en rojo con el código anterior y en verde con el arreglo.
 
 ### 3.4.3 — La raíz del proyecto sale del repo en el que estás
 
