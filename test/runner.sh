@@ -72,6 +72,50 @@ caso "stderr de 200 KB (más que el búfer del pipe)"      3      200000 1
 caso "stdout de 200 KB y stderr de 200 KB a la vez"      200000 200000 2
 caso "sin salida ninguna"                                0      0      0
 
+# --- `failed`: los casos en rojo, con nombre, junto a los totales ---------------------------
+# Quien imprime sólo el resumen (`jq '{ok,totals}'`) perdía qué test falló: el dato estaba en
+# `suites[].cases[]`. Se pasa por el `JUnitParser::parse()` REAL un JUnit con la forma que emite
+# PHPUnit (suite anidada, pass/fail/error/skip/warning).
+printf '\n\033[1;36m— failed: los casos fail/error con nombre —\033[0m\n'
+cat > "$BASE/junit.xml" <<'XML'
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Test/Plugins" tests="5">
+    <testsuite name="A\ATest" tests="3">
+      <testcase name="testBien" class="A\ATest" assertions="1" time="0.1"/>
+      <testcase name="testMal" class="A\ATest" assertions="1" time="0.1"><failure type="PHPUnit\Framework\ExpectationFailedException">A\ATest::testMal
+Failed asserting that false is true.
+
+/ruta/ATest.php:12</failure></testcase>
+      <testcase name="testSalta" class="A\ATest" assertions="0" time="0"><skipped/></testcase>
+    </testsuite>
+    <testsuite name="B\BTest" tests="2">
+      <testcase name="testRevienta" class="B\BTest" assertions="0" time="0.1"><error type="Error">B\BTest::testRevienta
+Error: Class "X" not found</error></testcase>
+      <testcase name="testAvisa" class="B\BTest" assertions="1" time="0.1"><warning>aviso</warning></testcase>
+    </testsuite>
+  </testsuite>
+</testsuites>
+XML
+cat > "$BASE/parser.php" <<'PHP'
+<?php
+[, $arnes, $xml] = $argv;
+require $arnes . '/web/src/JUnitParser.php';
+$p = TestWeb\JUnitParser::parse((string)file_get_contents($xml));
+echo json_encode(['failed' => $p['failed'], 'totals' => $p['totals'], 'vacio' => TestWeb\JUnitParser::parse('')['failed']]), "\n";
+PHP
+sal="$(php "$BASE/parser.php" "$T" "$BASE/junit.xml" 2>&1)"
+fal="$(php -r '$j=json_decode($argv[1],true); foreach($j["failed"] as $f) echo $f["test"],"|",$f["status"],"|",$f["message"],"\n";' "$sal")"
+[ "$(wc -l <<<"$fal")" -eq 2 ] && ok "dos casos en failed: el fail y el error, ni el skip ni el warning" || mal "failed no trae exactamente 2: $sal"
+grep -qxF 'A\ATest::testMal|fail|Failed asserting that false is true.' <<<"$fal" && ok "el fail, como Clase::metodo, con su status y el motivo (no la línea del nombre)" || mal "falta el fail: $fal"
+grep -qxF 'B\BTest::testRevienta|error|Error: Class "X" not found' <<<"$fal" && ok "el error, de una suite distinta" || mal "falta el error: $fal"
+grep -qF '"fail":1' <<<"$sal" && grep -qF '"error":1' <<<"$sal" && ok "y concuerda con totals (fail 1, error 1)" || mal "totals no concuerda: $sal"
+grep -qF '"vacio":[]' <<<"$sal" && ok "sin JUnit, failed es una lista vacía (no falta la clave)" || mal "JUnit vacío: $sal"
+for m in run runCore; do
+    n="$(sed -n "/public function $m(/,/^    }/p" "$T/web/src/TestRunner.php" | grep -c "'failed' => \$parsed\['failed'\]")"
+    [ "$n" -eq 1 ] && ok "$m() devuelve failed" || mal "$m() no devuelve failed"
+done
+
 printf '\n'
 [ "$FALLOS" -eq 0 ] && { printf '\033[1;32m%s comprobaciones, todas en verde.\033[0m\n' "$OK"; exit 0; }
 printf '\033[1;31m%s en verde, %s FALLIDAS.\033[0m\n' "$OK" "$FALLOS"; exit 1

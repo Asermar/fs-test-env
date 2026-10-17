@@ -264,13 +264,27 @@ rota — está diciendo que ese flag no significa lo que crees.
     "ok": true, "plugin": "BusCanarias", "sub": "main", "file": "",
     "config": "phpunit-webrunner.xml", "exitCode": 0, "stdout": "...",
     "installLog": "...",
-    "totals": {"tests": 11, "pass": 11, "fail": 0, "error": 0, "skip": 0,
-               "warning": 0, "assertions": 113, "time": 1.68}
+    "suites": [...],
+    "totals": {"tests": 11, "pass": 10, "fail": 1, "error": 0, "skip": 0,
+               "warning": 0, "assertions": 113, "time": 1.68},
+    "failed": [{"test": "Tests\\FooTest::testBar", "status": "fail",
+                "message": "Failed asserting that false is true."}]
   }
   ```
   `exitCode` es el de PHPUnit (0 = todo verde); `totals` viene de parsear el `--log-junit`
   (`JUnitParser`), así que es fiable aunque `stdout` se trunque. En fallo de parámetros/entorno
   (`"ok": false`) trae `error` con el motivo, sin `totals`.
+
+  **`failed` nombra los casos en `fail` o `error`** (`Clase::metodo`, estado y la primera línea
+  del motivo), y es `[]` cuando no hay ninguno. Existe para que quien guarde sólo el resumen no
+  pierda **cuál** falló: el detalle completo sigue en `suites[].cases[]`, pero un
+  `jq '{ok,totals}'` lo tira, y un rojo que no se repite ya no se puede identificar. Así que el
+  resumen que conviene imprimir es éste:
+
+  ```bash
+  curl -s -X POST "http://<TESTENV_HOST>/?action=run" --data-urlencode "plugin=BusCanarias" \
+      --data-urlencode "sub=main" | jq -c '{ok, totals, failed}'
+  ```
 
 ## Las baterías del arnés
 
@@ -317,8 +331,10 @@ nunca. **15 comprobaciones.**
 **`test/runner.sh`** — comprueba que **el runner web vuelve por mucho que escriba phpunit**: invoca el
 `TestRunner::exec()` real con un hijo que escribe 200 KB por stderr (más que el búfer de un pipe) y
 comprueba que vuelve dentro de un `timeout` y que devuelve lo mismo de siempre —código de salida,
-stdout seguido de stderr, y stderr aparte—. Lleva su **control positivo** con salida pequeña.
-**16 comprobaciones, menos de 1 s.**
+stdout seguido de stderr, y stderr aparte—. Lleva su **control positivo** con salida pequeña. Y pasa
+por el `JUnitParser::parse()` real un JUnit con la forma que emite PHPUnit para comprobar que
+`failed` trae el fail y el error —con su motivo, no la línea del nombre— y deja fuera skip y warning.
+**23 comprobaciones, menos de 1 s.**
 
 ```bash
 test/registro.sh                  # desde la raíz del arnés

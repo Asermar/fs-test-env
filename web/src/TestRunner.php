@@ -124,6 +124,7 @@ class TestRunner
             'installLog' => implode("\n", array_filter($log)),
             'suites' => $parsed['suites'] ?? [],
             'totals' => $parsed['totals'] ?? [],
+            'failed' => $parsed['failed'] ?? [],
         ];
     }
 
@@ -185,6 +186,7 @@ class TestRunner
             'installLog' => '',
             'suites' => $parsed['suites'] ?? [],
             'totals' => $parsed['totals'] ?? [],
+            'failed' => $parsed['failed'] ?? [],
         ];
     }
 
