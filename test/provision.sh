@@ -276,6 +276,49 @@ grep -qF 'lánzalo desde la raíz' <<<"$SAL" \
     && mal "manda al arreglo equivocado: la raíz la había dicho quien invoca" \
     || ok "…y no le manda a cambiarse de directorio, que no arreglaría nada"
 
+# --- core presente SIN .git desde un sitio CON git: se niega, y el lock del runner se respeta -----
+# Una copia de okoworktree deja el core del entorno de test sin `.git`. Desde el host esto moría con
+# rc 128 de `git clone` —parecía «ya provisionado»—, y seguir adelante sería peor: el config.php
+# declara la base vista desde el contenedor, y desde el host puede ser la de OTRA instalación.
+printf '\n\033[1;36m— core sin .git con git disponible: se NIEGA y da la orden del contenedor —\033[0m\n'
+TE="$BASE/copia/test-env/facturascripts"
+mkdir -p "$BASE/copia/src" "$TE/Core"
+printf '<?php // pega\n' > "$TE/Core/Kernel.php"
+cat > "$BASE/copia/src/config.php" <<'PHP'
+<?php
+define('FS_DB_HOST', 'db.ejemplo'); define('FS_DB_PORT', '3306'); define('FS_DB_USER', 'u');
+define('FS_DB_PASS', 'p'); define('FS_DB_NAME', 'trabajo');
+PHP
+printf 'TEST_DB=pruebas\nTESTENV_CONTAINER=zz-copia-test\nTESTENV_REPO_PATH=%s\n' "$BASE/copia" > "$BASE/copia/.fs-test-env.env"
+corre_prov() { FS_PROJECT_ROOT="$BASE/copia" CORE_BRANCH=master NO_COLOR=1 "$PROV" 2>&1; }
+SAL="$(corre_prov)"; RC=$?
+[ "$RC" -eq 1 ] && ok "falla con rc 1 (no el 128 de git)" || mal "rc $RC"
+grep -qF 'NO es un clon de git' <<<"$SAL" && ok "dice qué pasa" || mal "mensaje mudo: $(tail -2 <<<"$SAL")"
+grep -qF 'podman exec zz-copia-test bash -c' <<<"$SAL" && ok "…y da la orden con el contenedor de la copia" \
+    || mal "no da la orden del contenedor"
+grep -qF 'Clonando core' <<<"$SAL" && mal "llegó a intentar el clon: la guarda va tarde" || ok "…y se niega ANTES de clonar"
+[ -e "$BASE/copia/test-env/.webrunner.lock" ] && mal "creó el lock pese a negarse" || ok "…sin escribir nada (ni el lock)"
+
+printf '\n\033[1;36m— LA PAREJA: con el core clonado (.git) la guarda no para —\033[0m\n'
+git init -q "$TE"
+SAL="$(corre_prov)"
+grep -qF 'NO es un clon de git' <<<"$SAL" && mal "para un core clonado" || ok "deja pasar un core con .git"
+grep -qF 'Actualizando core existente' <<<"$SAL" && ok "…y sigue hasta actualizar el core (el fetch falla: no hay origin)" \
+    || mal "no llegó a la actualización: no prueba que pasara: $(tail -2 <<<"$SAL")"
+
+printf '\n\033[1;36m— con el lock del runner TOMADO (tests o ráfaga de cores en marcha) se niega —\033[0m\n'
+LOCKF="$BASE/copia/test-env/.webrunner.lock"
+( flock 8; sleep 30 ) 8>"$LOCKF" & TENEDOR=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do flock -n "$LOCKF" true 2>/dev/null || break; sleep 0.1; done
+SAL="$(corre_prov)"; RC=$?
+kill "$TENEDOR" 2>/dev/null; wait "$TENEDOR" 2>/dev/null
+[ "$RC" -eq 1 ] && grep -qF 'está en uso' <<<"$SAL" && ok "se niega POR el lock (rc 1), sin esperar" \
+    || mal "no respeta el lock (rc $RC): $(tail -2 <<<"$SAL")"
+grep -qF 'Actualizando core existente' <<<"$SAL" && mal "tocó el core con el lock ajeno tomado" || ok "…y no toca el core"
+SAL="$(corre_prov)"
+grep -qF 'está en uso' <<<"$SAL" && mal "sigue negándose con el lock libre" || ok "con el lock libre, vuelve a pasar"
+rm -rf "$BASE/copia/test-env" "$BASE/copia/src" "$BASE/copia/.fs-test-env.env"
+
 printf '\n'
 [ "$FALLOS" -eq 0 ] && { printf '\033[1;32m%s comprobaciones, todas en verde.\033[0m\n' "$OK"; exit 0; }
 printf '\033[1;31m%s en verde, %s FALLIDAS.\033[0m\n' "$OK" "$FALLOS"; exit 1
