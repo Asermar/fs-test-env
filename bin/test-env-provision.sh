@@ -177,6 +177,40 @@ if [ "$TEST_DB" = "$DB_WORK" ]; then
     exit 1
 fi
 
+# --- core presente SIN .git, con git disponible: se provisiona DENTRO del contenedor ---------------
+# El core de un entorno de test puede venir sin `.git` (copiado o montado desde otro árbol). Dentro de
+# su contenedor no hay git y se usa tal cual; pero en el HOST, con git, esto caía en «clonar» encima
+# de una carpeta llena y moría con rc 128 de git — fácil de leer como «ya estaba provisionado».
+# Y NO se sigue adelante usándolo: el `config.php` declara host y puerto vistos DESDE el contenedor,
+# y en el host esos nombres pueden resolver a 127.0.0.1 y ese puerto ser el motor de OTRA instalación
+# (pasó: una provisión desde el host se conectó a la base de otro cliente). Así que se niega, y dice
+# dónde se hace.
+if command -v git >/dev/null 2>&1 && [ ! -d "$TESTENV_DIR/.git" ] && [ -f "$TESTENV_DIR/Core/Kernel.php" ]; then
+    echo "ERROR: el core de '$TESTENV_DIR' está presente pero NO es un clon de git." >&2
+    echo "  Este entorno se provisiona DENTRO de su contenedor de test, no desde aquí: desde fuera," >&2
+    echo "  la base de datos que declara config.php puede resolver a otra instalación." >&2
+    if [ -n "${TESTENV_CONTAINER:-}" ]; then
+        echo "  Orden:  podman exec $TESTENV_CONTAINER bash -c \"FS_PROJECT_ROOT=${TESTENV_REPO_PATH:-$FS_PROJECT_ROOT} $FS_TEST_DIR/bin/test-env-provision.sh\"" >&2
+    else
+        echo "  Orden:  podman exec <contenedor-de-test> <ruta-del-arnés>/bin/test-env-provision.sh" >&2
+    fi
+    exit 1
+fi
+
+# --- lock: el MISMO que el runner web y la ráfaga de cores ---------------------------------------
+# `dirname TESTENV_DIR`/.webrunner.lock es el cerrojo de quien usa este entorno: el runner web lo
+# espera y la ráfaga de cores lo retiene mientras tiene el core CAMBIADO. Provisionar en medio
+# desplegaría contra un core que no es el del proyecto, así que no se espera: se niega. Se retiene
+# hasta el final, para que la exclusión valga en los dos sentidos.
+mkdir -p "$(dirname "$TESTENV_DIR")"
+WEBRUNNER_LOCK="$(dirname "$TESTENV_DIR")/.webrunner.lock"
+exec 9>"$WEBRUNNER_LOCK"
+if ! flock -n 9; then
+    echo "ERROR: el entorno de test está en uso (lock $WEBRUNNER_LOCK): hay tests o una ráfaga de" >&2
+    echo "  cores en marcha. Repite cuando termine." >&2
+    exit 1
+fi
+
 printf '%s================================================================%s\n' "$C_STEP" "$C_RESET"
 printf '%sProvisión del entorno de pruebas%s\n' "$C_STEP" "$C_RESET"
 echo "Core    : $CORE_REPO ($CORE_BRANCH)"

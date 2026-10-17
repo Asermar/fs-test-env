@@ -321,7 +321,22 @@ Y, aparte de la guarda, **de dónde saca `setup-test-env.sh` la raíz del proyec
 repositorio en el que estás —no de dónde vive el arnés, que es `Tooling` y no el proyecto de nadie— y
 que, cuando no la encuentra, el mensaje **distingue si la raíz la dijiste tú o se derivó sola**, que
 es lo que decide cuál es el arreglo. Se comprueba por el camino que falla, así que no entra en el
-modo interactivo ni toca la red. **53 comprobaciones, unos 7 s.**
+modo interactivo ni toca la red.
+
+Y las **dos guardas de `test-env-provision.sh` antes de tocar el core**:
+- **Core presente sin `.git` con git disponible.** Es lo que deja okoworktree en sus copias, y en la
+  práctica significa que se está lanzando desde el host. Antes moría con el rc 128 de `git clone`, que
+  se confundía con «ya provisionado». Ahora se niega con rc 1 y da la orden `podman exec` del
+  contenedor de test. No sigue adelante con ese core porque el `config.php` declara la base de datos
+  vista **desde el contenedor**: desde el host ese nombre y ese puerto pueden ser los de otra
+  instalación.
+- **El lock del runner web** (`.webrunner.lock`, junto al entorno). Es el mismo que espera el runner y
+  que retiene la ráfaga de cores mientras tiene el core cambiado. Si está tomado, la provisión se
+  niega sin esperar. Si lo coge, lo retiene hasta terminar.
+
+Cada guarda lleva su pareja: con un core clonado, o con el lock libre, la provisión pasa. Lo que esta
+batería **no** prueba es la rama sin git (dentro del contenedor), que no ha cambiado.
+**63 comprobaciones, unos 7 s.**
 
 **`test/teardown.sh`** — comprueba que **`--keep-db` se retiró y pasarlo falla sin borrar nada**, y
 que la raíz del proyecto sale del directorio actual. Lleva su **control positivo** —la invocación sin
