@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.5.0-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.5.1-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -491,6 +491,35 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.5.1 — Provisionar una copia desde el host deja de parecer «ya estaba hecho»
+
+- **3.5.1** — **`test-env-provision.sh` se niega, desde el host, ante un core presente pero sin
+  `.git`** —el estado en el que `okoworktree` deja el core de cada copia— y **dice con qué
+  `podman exec` se hace**. Antes caía en su rama de «clonar» sobre una carpeta llena y moría con el
+  **rc 128 de git** («la ruta de destino ya existe y no es un directorio vacío»), que se lee como
+  «ya estaba provisionado»: el trabajo no se hacía, y la pasada siguiente salía roja por un entorno
+  que no correspondía al árbol. **Y no se sigue adelante usando ese core**, que era el arreglo
+  obvio: el `config.php` declara host y puerto de la base **vistos desde el contenedor**, y en el
+  host esos nombres resuelven a `127.0.0.1` y el puerto puede ser el motor de **otra instalación**
+  —ya pasó, con la base de otro cliente—. El rc 128 lo impedía por casualidad. Dentro del
+  contenedor no hay `git` y la rama de «uso el core ya presente» no cambia.
+- **3.5.1** — **Respeta el `.webrunner.lock`**, el mismo cerrojo que espera el runner web y que la
+  ráfaga de cores retiene mientras tiene el core **cambiado**. Si está tomado se niega **sin
+  esperar**, como hace la ráfaga; y si lo coge lo retiene hasta terminar, así que la exclusión vale
+  en los dos sentidos. Provisionar en mitad de una ráfaga desplegaba contra un core temporal.
+- **3.5.1** — `test/provision.sh` pasa de 53 a **63 comprobaciones**, con la pareja de cada guarda.
+
+**Comprobado antes de etiquetar, por quien publica**: las cuatro baterías en verde —`provision`
+**63/63**, `registro` 41/41, `runner` 23/23 y `teardown` 15/15— y las dos guardas acotadas por
+separado: retirando la del core sin `.git`, `provision` enrojece **5** comprobaciones —entre ellas
+«llegó a intentar el clon: la guarda va tarde»—; retirando la del lock, **2**. **Y contra una copia
+de `okoworktree` recién creada**, que es donde nació el defecto: con el código de la v3.5.0 el guion
+da **rc 128** y el mensaje mudo del clon, y con éste da **rc 1** y la orden del contenedor, que
+**ejecutada literalmente provisiona** (rc 0, «Entorno de pruebas listo»). El cerrojo, en esa misma
+copia: tomado desde fuera se niega con rc 1; libre, vuelve a pasar con rc 0. Y las **tres** rutas que
+nombran ese cerrojo —`TestRunner.php`, `test-env-mutacion.sh` y este guion— resuelven al mismo
+fichero, comprobado.
 
 ### 3.5.0 — La API del runner dice QUÉ test no pasó, no sólo cuántos
 
