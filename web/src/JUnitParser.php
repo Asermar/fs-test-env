@@ -12,12 +12,13 @@ class JUnitParser
     /**
      * @return array{
      *   suites: array<int, array<string, mixed>>,
-     *   totals: array<string, int|float>
+     *   totals: array<string, int|float>,
+     *   failed: array<int, array{test: string, status: string, message: string}>
      * }
      */
     public static function parse(string $xmlContent): array
     {
-        $out = ['suites' => [], 'totals' => self::emptyTotals()];
+        $out = ['suites' => [], 'totals' => self::emptyTotals(), 'failed' => []];
 
         if (trim($xmlContent) === '') {
             return $out;
@@ -33,6 +34,22 @@ class JUnitParser
         // Las suites de primer nivel (una por fichero/clase de test).
         foreach ($xml->testsuite as $suite) {
             self::collect($suite, $out);
+        }
+
+        // Los casos fail/error, con nombre, junto a los totales: quien imprima solo el
+        // resumen tiene que poder saber CUÁL falló sin conservar `suites`.
+        foreach ($out['suites'] as $s) {
+            foreach ($s['cases'] as $c) {
+                if ($c['status'] !== 'fail' && $c['status'] !== 'error') {
+                    continue;
+                }
+                $test = $c['class'] . '::' . $c['name'];
+                $out['failed'][] = [
+                    'test' => $test,
+                    'status' => $c['status'],
+                    'message' => self::shortMessage($c['detail'], $test),
+                ];
+            }
         }
 
         return $out;
@@ -114,6 +131,21 @@ class JUnitParser
         $detail = trim((string)$node);
         $message = $detail === '' ? '' : strtok($detail, "\n");
         return [$type, (string)$message, $detail];
+    }
+
+    /**
+     * Primera línea con contenido que no sea el propio nombre del test: PHPUnit abre el
+     * texto del fallo con «Clase::metodo», así que la primera línea a secas no dice nada.
+     */
+    private static function shortMessage(string $detail, string $test): string
+    {
+        foreach (explode("\n", $detail) as $line) {
+            $line = trim($line);
+            if ($line !== '' && $line !== $test) {
+                return $line;
+            }
+        }
+        return '';
     }
 
     private static function emptyTotals(): array

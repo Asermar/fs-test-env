@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.4.4-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.5.0-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -264,13 +264,27 @@ rota — está diciendo que ese flag no significa lo que crees.
     "ok": true, "plugin": "BusCanarias", "sub": "main", "file": "",
     "config": "phpunit-webrunner.xml", "exitCode": 0, "stdout": "...",
     "installLog": "...",
-    "totals": {"tests": 11, "pass": 11, "fail": 0, "error": 0, "skip": 0,
-               "warning": 0, "assertions": 113, "time": 1.68}
+    "suites": [...],
+    "totals": {"tests": 11, "pass": 10, "fail": 1, "error": 0, "skip": 0,
+               "warning": 0, "assertions": 113, "time": 1.68},
+    "failed": [{"test": "Tests\\FooTest::testBar", "status": "fail",
+                "message": "Failed asserting that false is true."}]
   }
   ```
   `exitCode` es el de PHPUnit (0 = todo verde); `totals` viene de parsear el `--log-junit`
   (`JUnitParser`), así que es fiable aunque `stdout` se trunque. En fallo de parámetros/entorno
   (`"ok": false`) trae `error` con el motivo, sin `totals`.
+
+  **`failed` nombra los casos en `fail` o `error`** (`Clase::metodo`, estado y la primera línea
+  del motivo), y es `[]` cuando no hay ninguno. Existe para que quien guarde sólo el resumen no
+  pierda **cuál** falló: el detalle completo sigue en `suites[].cases[]`, pero un
+  `jq '{ok,totals}'` lo tira, y un rojo que no se repite ya no se puede identificar. Así que el
+  resumen que conviene imprimir es éste:
+
+  ```bash
+  curl -s -X POST "http://<TESTENV_HOST>/?action=run" --data-urlencode "plugin=BusCanarias" \
+      --data-urlencode "sub=main" | jq -c '{ok, totals, failed}'
+  ```
 
 ## Las baterías del arnés
 
@@ -317,8 +331,10 @@ nunca. **15 comprobaciones.**
 **`test/runner.sh`** — comprueba que **el runner web vuelve por mucho que escriba phpunit**: invoca el
 `TestRunner::exec()` real con un hijo que escribe 200 KB por stderr (más que el búfer de un pipe) y
 comprueba que vuelve dentro de un `timeout` y que devuelve lo mismo de siempre —código de salida,
-stdout seguido de stderr, y stderr aparte—. Lleva su **control positivo** con salida pequeña.
-**16 comprobaciones, menos de 1 s.**
+stdout seguido de stderr, y stderr aparte—. Lleva su **control positivo** con salida pequeña. Y pasa
+por el `JUnitParser::parse()` real un JUnit con la forma que emite PHPUnit para comprobar que
+`failed` trae el fail y el error —con su motivo, no la línea del nombre— y deja fuera skip y warning.
+**23 comprobaciones, menos de 1 s.**
 
 ```bash
 test/registro.sh                  # desde la raíz del arnés
@@ -460,6 +476,31 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.5.0 — La API del runner dice QUÉ test no pasó, no sólo cuántos
+
+- **3.5.0** — **`POST ?action=run` devuelve `failed`**: una entrada por cada test en `fail` o
+  `error`, con su nombre como `Clase::metodo`, su estado y la primera línea del motivo. Si no hay
+  ninguno devuelve `[]`, no omite la clave, así que el consumidor no tiene que distinguir «ninguno»
+  de «no lo sé». Vale igual para un plugin y para el core (`runCore()`). **Es aditivo**: no cambia
+  ni retira ningún campo de los que ya había. Lo que resuelve es un agujero de esta casa: quien
+  guarda sólo el resumen —`jq '{ok,totals}'`, que es lo que recomienda este mismo README— se queda
+  con un «82 de 83» y **sin forma de saber cuál fue**, y eso pasó de verdad en BusCanarias con un
+  rojo que no volvió a salir en 17 pasadas. El motivo se toma de la línea **siguiente** al nombre
+  porque PHPUnit abre cada fallo con `Clase::metodo`; está medido contra un JUnit real, no deducido
+  del formato.
+- **3.5.0** — La batería **`test/runner.sh`** pasa de 16 a **23 comprobaciones**: las siete nuevas
+  se reparten entre el parser de JUnit —fail y error de suites distintas, concordancia con
+  `totals`, y la lista vacía cuando no hay JUnit— y las dos puertas de la API.
+
+**Comprobado antes de etiquetar, por quien publica y en clon desechable**: `test/runner.sh` da
+**23 de 23** en verde. **Control**: retirando del runner las dos líneas que añaden `failed` —y sólo
+ésas— cae a **21 de 23**, y las dos que fallan son exactamente «run() devuelve failed» y «runCore()
+devuelve failed», así que la batería mide lo que dice medir. Y el campo **se ha usado contra datos
+reales** el mismo día, publicando BusCanarias v3.47: nombró
+`ReservaTransferDeleteTest::testDeleteTransferReservationRemovesProcesadaRow`
+(«procesada-row-not-removed») y `VerificadorArticuloTest::testMunicipioDesconocidoSoloBloqueaConRutas`
+(«el escenario debe partir sin rutas»), que es exactamente el caso para el que se hizo.
 
 ### 3.4.4 — El runner web ya no se cuelga con muchos tests en rojo
 
