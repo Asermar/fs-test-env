@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.4.4-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.5.0-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -476,6 +476,31 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.5.0 — La API del runner dice QUÉ test no pasó, no sólo cuántos
+
+- **3.5.0** — **`POST ?action=run` devuelve `failed`**: una entrada por cada test en `fail` o
+  `error`, con su nombre como `Clase::metodo`, su estado y la primera línea del motivo. Si no hay
+  ninguno devuelve `[]`, no omite la clave, así que el consumidor no tiene que distinguir «ninguno»
+  de «no lo sé». Vale igual para un plugin y para el core (`runCore()`). **Es aditivo**: no cambia
+  ni retira ningún campo de los que ya había. Lo que resuelve es un agujero de esta casa: quien
+  guarda sólo el resumen —`jq '{ok,totals}'`, que es lo que recomienda este mismo README— se queda
+  con un «82 de 83» y **sin forma de saber cuál fue**, y eso pasó de verdad en BusCanarias con un
+  rojo que no volvió a salir en 17 pasadas. El motivo se toma de la línea **siguiente** al nombre
+  porque PHPUnit abre cada fallo con `Clase::metodo`; está medido contra un JUnit real, no deducido
+  del formato.
+- **3.5.0** — La batería **`test/runner.sh`** pasa de 16 a **23 comprobaciones**: las siete nuevas
+  se reparten entre el parser de JUnit —fail y error de suites distintas, concordancia con
+  `totals`, y la lista vacía cuando no hay JUnit— y las dos puertas de la API.
+
+**Comprobado antes de etiquetar, por quien publica y en clon desechable**: `test/runner.sh` da
+**23 de 23** en verde. **Control**: retirando del runner las dos líneas que añaden `failed` —y sólo
+ésas— cae a **21 de 23**, y las dos que fallan son exactamente «run() devuelve failed» y «runCore()
+devuelve failed», así que la batería mide lo que dice medir. Y el campo **se ha usado contra datos
+reales** el mismo día, publicando BusCanarias v3.47: nombró
+`ReservaTransferDeleteTest::testDeleteTransferReservationRemovesProcesadaRow`
+(«procesada-row-not-removed») y `VerificadorArticuloTest::testMunicipioDesconocidoSoloBloqueaConRutas`
+(«el escenario debe partir sin rutas»), que es exactamente el caso para el que se hizo.
 
 ### 3.4.4 — El runner web ya no se cuelga con muchos tests en rojo
 
