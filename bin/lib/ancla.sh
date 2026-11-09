@@ -145,7 +145,7 @@ ancla_niega() {
         fi
         printf '  Crea la copia y trabaja ahí — esto es lo que quieres si vienes a dejar los tests en verde\n'
         printf '  para cerrar una rama:\n\n'
-        printf '      okoworktree add <nombre> --db-mode fresh\n\n'
+        printf '      okoworktree add <nombre> --db-mode fresh --rama <rama> --base develop\n\n'
         printf '  Eso levanta su stack y provisiona su entorno de test, con SU base de datos.\n\n'
         printf '  Si de verdad hace falta aquí —y conviene decir por qué antes de hacerlo— el escape es\n'
         printf '  explícito y hay que escribirlo en cada invocación:\n\n'

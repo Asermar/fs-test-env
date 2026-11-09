@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.5.1-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.5.2-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -76,7 +76,8 @@ $FS_TEST/bin/setup-test-env.sh          # en el host (interactivo)
 
 > El entorno de test vive en una **copia de trabajo**, no en el checkout principal: el provisionador
 > se niega ahí (con escape `--en-el-principal`, que avisa). Lo normal es no invocarlo a mano —
-> `okoworktree add <nombre> --db-mode fresh` crea la copia, su stack y su entorno de test.
+> `okoworktree add <nombre> --db-mode fresh --rama <rama> --base develop` crea la copia, su stack y
+> su entorno de test.
 
 ### Podman o Docker
 
@@ -136,8 +137,8 @@ tres scripts que pueden montarlo se niegan en el checkout principal:
 | `test-env-provision.sh` | crear el entorno entero |
 
 El rechazo **cita la entrada del registro** y ofrece la salida en el mismo mensaje —
-`okoworktree add <nombre> --db-mode fresh`—, porque quien llega ahí suele venir a dejar los tests en
-verde para cerrar una rama y una negativa a secas lo deja igual de atascado.
+`okoworktree add <nombre> --db-mode fresh --rama <rama> --base develop`—, porque quien llega ahí suele
+venir a dejar los tests en verde para cerrar una rama y una negativa a secas lo deja igual de atascado.
 
 **El escape es `--en-el-principal`**, y avisa cada vez. Es un flag y no una variable de entorno a
 propósito: una variable se exporta una vez y se olvida, y a partir de ahí el rechazo dejaría de
@@ -491,6 +492,28 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.5.2 — La salida que ofrece el rechazo vuelve a funcionar al copiarla
+
+- **3.5.2** — **La orden que `fs-test` ofrece cuando se niega en un checkout principal —y la que da
+  este README para abrir una copia— pasa a ser `okoworktree add <nombre> --db-mode fresh --rama
+  <rama> --base develop`.** Desde **Scripts v1.25.0**, `okoworktree add` exige `--base` al **crear**
+  la rama, y sin `--rama` la rama es `<nombre>`, que casi nunca existe: así que la orden anterior
+  moría con «falta --base» justo al copiarla. El mensaje existe para dar una salida, y la salida no
+  salía. Lleva `--rama` porque quien llega ahí viene a cerrar una rama que **ya existe** —entonces la
+  copia se monta sobre ella y `--base` sólo avisa de que no se usa—, y `--base develop` para cuando
+  es nueva, que en OkoFlow es de donde sale una feature.
+- **3.5.2** — `test/provision.sh` comprueba ahora que esa salida **lleva `--base`**, para que el día
+  que alguien la reescriba sin él la batería lo diga en vez de dejar un mensaje inservible.
+
+**Comprobado antes de etiquetar, por quien publica**: las cuatro baterías en verde en un clon
+desechable de la punta —`provision` **64/64**, `registro` 41/41, `runner` 23/23 y `teardown` 15/15—
+y la aserción nueva **acotada**: devolviendo el texto viejo a `ancla.sh`, `provision` queda en
+**63/1** y la que enrojece es exactamente «la salida no lleva --base», ninguna más. **Y contra el
+`okoworktree` 1.25.0 ya instalado en la máquina**, que es la causa del arreglo: la forma nueva pasa
+con rama **existente** y con rama **nueva**, y la vieja se niega con «falta --base». Lo que no se ha
+ejercitado es el `--db-mode fresh` de la orden, que necesita una pila de FacturaScripts detrás: lo
+medido es la forma de la orden, que es lo que el mensaje cambia.
 
 ### 3.5.1 — Provisionar una copia desde el host deja de parecer «ya estaba hecho»
 
