@@ -76,7 +76,8 @@ $FS_TEST/bin/setup-test-env.sh          # en el host (interactivo)
 
 > El entorno de test vive en una **copia de trabajo**, no en el checkout principal: el provisionador
 > se niega ahí (con escape `--en-el-principal`, que avisa). Lo normal es no invocarlo a mano —
-> `okoworktree add <nombre> --db-mode fresh` crea la copia, su stack y su entorno de test.
+> `okoworktree add <nombre> --db-mode fresh --rama <rama> --base develop` crea la copia, su stack y
+> su entorno de test.
 
 ### Podman o Docker
 
@@ -136,8 +137,8 @@ tres scripts que pueden montarlo se niegan en el checkout principal:
 | `test-env-provision.sh` | crear el entorno entero |
 
 El rechazo **cita la entrada del registro** y ofrece la salida en el mismo mensaje —
-`okoworktree add <nombre> --db-mode fresh`—, porque quien llega ahí suele venir a dejar los tests en
-verde para cerrar una rama y una negativa a secas lo deja igual de atascado.
+`okoworktree add <nombre> --db-mode fresh --rama <rama> --base develop`—, porque quien llega ahí suele
+venir a dejar los tests en verde para cerrar una rama y una negativa a secas lo deja igual de atascado.
 
 **El escape es `--en-el-principal`**, y avisa cada vez. Es un flag y no una variable de entorno a
 propósito: una variable se exporta una vez y se olvida, y a partir de ahí el rechazo dejaría de

@@ -86,6 +86,7 @@ SAL="$(corre "$BASE/principal")"; RC=$?
 [ "$RC" -ne 0 ] && ok "falla (rc $RC)" || mal "no se niega"
 grep -qF 'checkout PRINCIPAL' <<<"$SAL" && ok "dice qué pasa" || mal "mensaje mudo"
 grep -qF 'okoworktree add' <<<"$SAL" && ok "…y da la salida buena" || mal "no dice qué hacer"
+grep -qF -- '--base ' <<<"$SAL" && ok "…y la salida lleva --base: sin él okoworktree se niega a crear la rama" || mal "la salida no lleva --base (okoworktree ≥1.25 se negará)"
 grep -qF -- '--en-el-principal' <<<"$SAL" && ok "…y nombra el escape en el propio rechazo" || mal "escape no nombrado"
 [ -d "$BASE/principal/test-env" ] && mal "creó test-env/ pese a negarse" || ok "y no creó nada"
 
