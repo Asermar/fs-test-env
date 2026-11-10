@@ -120,6 +120,8 @@ $FS_TEST/bin/pg-check.sh   # rc 0 «responde» / rc 1 «no responde», y dice po
 podman stop fstest-pg      # pararlo (pg-up.sh lo vuelve a arrancar con sus datos)
 ```
 
+Los dos scripts salen con **rc 2** si se les pasa cualquier argumento: no admiten ninguno.
+
 | | |
 |---|---|
 | Contenedor | `fstest-pg`, imagen `postgres:13.23` fijada por digest (`postgres/podman-compose.yaml`) |
@@ -131,6 +133,26 @@ podman stop fstest-pg      # pararlo (pg-up.sh lo vuelve a arrancar con sus dato
 `pg-up.sh` crea el fichero de la contraseña con una al azar si no existe, sin imprimirla ni pasarla
 por argv. `pg-check.sh` prueba los dos caminos con `psql` desde un contenedor desechable de la misma
 imagen, y distingue «no hay contenedor», «está parado» y «no contesta por tal camino».
+
+### Tras reiniciar la máquina no vuelve solo
+
+El contenedor es `restart: unless-stopped`, como el resto de servicios de la flota, y
+`podman-restart.service` sólo arranca los de `restart-policy=always`
+(`podman start --all --filter restart-policy=always`). Medido en Tharsis: tras un reinicio, los
+`unless-stopped` se quedan parados. Se levanta con `bin/pg-up.sh`, que conserva los datos y no hace
+nada si ya corre; por eso conviene que quien lo use lo llame antes, en vez de darlo por levantado.
+
+No se pone `always` porque ninguno de la flota lo lleva, y porque deshace en el siguiente arranque
+un `podman stop` hecho a propósito.
+
+### «healthy» puede estar congelado: la verdad la da `pg-check.sh`
+
+podman repite el healthcheck con un temporizador de systemd del usuario, y lo crea al crear o
+arrancar el contenedor. Si eso se hace desde una sesión que no alcanza ese systemd (la de un agente,
+por ejemplo: avisa con `unable to get systemd connection to add healthchecks`), el temporizador no
+existe y el estado que muestra `podman ps` se queda en el último que se calculó. `pg-up.sh` y
+`pg-check.sh` no lo leen: ejecutan la comprobación en el momento. Arrancarlo desde una terminal
+normal vuelve a crear el temporizador.
 
 ### La contraseña sólo cuenta al crear el clúster
 
