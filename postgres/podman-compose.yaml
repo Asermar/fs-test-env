@@ -1,0 +1,44 @@
+# PostgreSQL 13 del arnés de test: UNO compartido por todas las copias, propiedad de fs-test.
+#
+# Lo levanta bin/pg-up.sh y lo comprueba bin/pg-check.sh; no se usa este fichero a mano, porque
+# las dos rutas de abajo las pone pg-up.sh (y sin ellas la interpolación falla, a propósito).
+#
+# - 13, la versión del CI del core oficial (.github/workflows/test.yml), que es lo más cercano a lo
+#   que ejecuta la forja. Fijada por digest: «13» se mueve con cada imagen nueva de la rama.
+# - Nombre y red como el resto de servicios de la flota: container_name `fstest-pg`, del que
+#   hosts-podman-sync deriva `fstest-pg.asermar.com` para el host, y el mismo nombre como alias en
+#   la red `asermar.com` para los contenedores.
+# - PostgreSQL no se enruta por nombre (sin SNI), así que va con puerto propio y SÓLO en 127.0.0.1.
+# - keep-id + 1000:1000, como el MariaDB de los proyectos: los datos quedan a nombre del usuario del
+#   host. Medido con esta imagen: arranca así y el clúster sale como 1000:1000.
+# - La contraseña del superusuario NO está aquí: viene del fichero que nombra TOOLING_FS_TEST_PG_ENV
+#   (~/.config/tooling/fs-test_pg.env). Sólo cuenta al crear el clúster; ver el README.
+name: fstest
+services:
+  fstest-pg:
+    image: docker.io/library/postgres:13.23@sha256:4689940c683801b4ab839ab3b0a0a3555a5fe425371422310944e89eca7d8068
+    container_name: fstest-pg
+    restart: unless-stopped
+    userns_mode: keep-id
+    user: "1000:1000"
+    networks:
+      asermar.com:
+        aliases:
+          - fstest-pg.asermar.com
+    ports:
+      - "127.0.0.1:5432:5432"
+    env_file:
+      - ${TOOLING_FS_TEST_PG_ENV:?lo pone bin/pg-up.sh}
+    volumes:
+      - ${TOOLING_FS_TEST_PG_DATA:?lo pone bin/pg-up.sh}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      - traefik.enable=false
+
+networks:
+  asermar.com:
+    external: true

@@ -50,6 +50,9 @@ la interfaz incluidos), no requiere servidor.
 - `bin/lib/ancla.sh` — la guarda del checkout principal: la señal, el mensaje que ofrece la salida y
   el porqué, en un solo sitio para los tres scripts que pueden montar el entorno.
 - `bin/plugin-topo-order.php` — ordena plugins por sus dependencias `require`.
+- `bin/pg-up.sh` y `bin/pg-check.sh` — levantan y comprueban el **PostgreSQL 13 compartido** del
+  arnés (ver [El PostgreSQL de test](#el-postgresql-de-test)).
+- `postgres/` — su compose y el ejemplo de su fichero de contraseña.
 - `web/` — runner web (PHP plano + JS): lista los plugins con tests, muestra la **descripción
   markdown** (`@description`) de cada test y ejecuta las suites mostrando los resultados.
 - `templates/` — plantillas del vhost apache y del servicio compose, con placeholders `@@VAR@@`.
@@ -104,6 +107,50 @@ Localiza el compose automáticamente bajo la raíz del proyecto (según `CONTAIN
 `podman/podman-compose.yaml` o `docker-compose.yaml`, entre otros). Si tu compose está en
 otra ruta, define **`TESTENV_COMPOSE_FILE`** (absoluta o relativa a la raíz) en
 `.fs-test-env.env` o por entorno.
+
+## El PostgreSQL de test
+
+Un único PostgreSQL 13 para el arnés, **compartido por todas las copias** y propiedad de fs-test,
+no un servicio en el compose de cada proyecto. Es la versión del CI del core oficial. Cada copia
+tendrá en él su base y su rol.
+
+```bash
+$FS_TEST/bin/pg-up.sh      # idempotente: lo crea, lo arranca o no lo toca; acaba comprobando que responde
+$FS_TEST/bin/pg-check.sh   # rc 0 «responde» / rc 1 «no responde», y dice por qué
+podman stop fstest-pg      # pararlo (pg-up.sh lo vuelve a arrancar con sus datos)
+```
+
+| | |
+|---|---|
+| Contenedor | `fstest-pg`, imagen `postgres:13.23` fijada por digest (`postgres/podman-compose.yaml`) |
+| Desde los contenedores | `fstest-pg.asermar.com:5432`, por la red `asermar.com` |
+| Desde el host | `127.0.0.1:5432` (sólo loopback) |
+| Superusuario | `postgres`, con la contraseña de `~/.config/tooling/fs-test_pg.env` (0600, no versionado) |
+| Datos | `~/.local/share/tooling/fs-test_pg/data`, a nombre de tu usuario (`keep-id`) |
+
+`pg-up.sh` crea el fichero de la contraseña con una al azar si no existe, sin imprimirla ni pasarla
+por argv. `pg-check.sh` prueba los dos caminos con `psql` desde un contenedor desechable de la misma
+imagen, y distingue «no hay contenedor», «está parado» y «no contesta por tal camino».
+
+### La contraseña sólo cuenta al crear el clúster
+
+`POSTGRES_PASSWORD` la aplica la imagen **una vez**, cuando arranca con el directorio de datos vacío.
+Cambiarla después en el fichero no cambia la del servidor, y `pg-check.sh` empezará a fallar. Por lo
+mismo, `pg-up.sh` se niega a generar una nueva si falta el fichero pero ya hay un clúster.
+
+### Rotar la contraseña
+
+Dentro del contenedor, `postgres` entra por el socket local sin contraseña, y `\password` la pide
+sin eco, así que no pasa por argv ni por el historial:
+
+```bash
+podman exec -it fstest-pg psql -U postgres -c '\password postgres'
+$EDITOR ~/.config/tooling/fs-test_pg.env      # la misma, en POSTGRES_PASSWORD=
+$FS_TEST/bin/pg-check.sh                      # tiene que decir «responde» por los dos caminos
+```
+
+Si se ha perdido el fichero y no importan los datos (es un servidor de test), la otra vía es empezar
+de cero: `podman rm -f fstest-pg`, borrar `~/.local/share/tooling/fs-test_pg/data` y `pg-up.sh`.
 
 ## Configuración
 
