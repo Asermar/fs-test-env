@@ -65,16 +65,25 @@ if [ ! -f "$TOOLING_FS_TEST_PG_ENV" ]; then
         *)  echo "ERROR: no se pudo comprobar si existe $CONTENEDOR (podman ha fallado); no se genera contraseña." >&2
             exit 1 ;;
     esac
-    mkdir -p "$(dirname "$TOOLING_FS_TEST_PG_ENV")" || exit 1
-    # En una subshell con umask 077, para que el fichero nazca en 0600 y no haya un instante en que
-    # otro pueda leerlo. La contraseña no pasa por ninguna variable ni argumento.
-    #
-    # Y con noclobber (O_EXCL): dos pg-up.sh a la vez pasan los dos la comprobación de arriba, y sin
-    # esto el segundo truncaría la contraseña con la que el primero ya puede haber creado el clúster.
-    # Si al escribir ya existe, la escribió el otro: se usa la suya.
-    if ( umask 077; set -o noclobber
-         head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32 \
-             | { printf 'POSTGRES_PASSWORD='; cat; printf '\n'; } > "$TOOLING_FS_TEST_PG_ENV" ) 2>/dev/null; then
+    dir_env="$(dirname "$TOOLING_FS_TEST_PG_ENV")"
+    mkdir -p "$dir_env" || exit 1
+    # Se genera en un temporal del MISMO directorio (mktemp lo crea en 0600) y sólo se publica entero,
+    # con `ln`, que es atómico y no sobrescribe. Así el fichero no existe nunca a medias: ni queda uno
+    # roto si la generación falla, ni otro pg-up.sh lanzado a la vez puede leerlo antes de tiempo.
+    # Si `ln` encuentra el destino, lo publicó el otro, también entero: se usa el suyo. La contraseña
+    # no pasa por ninguna variable ni argumento.
+    temporal="$(mktemp "$dir_env/.$(basename "$TOOLING_FS_TEST_PG_ENV").XXXXXX")" || exit 1
+    trap 'rm -f -- "$temporal"' EXIT
+    head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32 \
+        | { printf 'POSTGRES_PASSWORD='; cat; printf '\n'; } > "$temporal"
+    # Se valida contra lo que se acaba de generar, 32 alfanuméricos: una contraseña truncada o vacía
+    # no se publica. (Un fichero que ya existía se valida más abajo con menos exigencia, porque tras
+    # rotarla puede llevar cualquier carácter.)
+    if ! grep -qxE 'POSTGRES_PASSWORD=[A-Za-z0-9]{32}' "$temporal" || [ "$(wc -l < "$temporal")" != 1 ]; then
+        echo "ERROR: no se pudo generar la contraseña; no se crea $TOOLING_FS_TEST_PG_ENV." >&2
+        exit 1
+    fi
+    if ln -- "$temporal" "$TOOLING_FS_TEST_PG_ENV" 2>/dev/null; then
         echo "Contraseña del superusuario generada en $TOOLING_FS_TEST_PG_ENV (0600)."
     elif [ -f "$TOOLING_FS_TEST_PG_ENV" ]; then
         echo "$TOOLING_FS_TEST_PG_ENV lo ha creado otro pg-up.sh a la vez; se usa esa contraseña."
@@ -82,6 +91,8 @@ if [ ! -f "$TOOLING_FS_TEST_PG_ENV" ]; then
         echo "ERROR: no se pudo escribir $TOOLING_FS_TEST_PG_ENV." >&2
         exit 1
     fi
+    rm -f -- "$temporal"
+    trap - EXIT
 fi
 modo="$(stat -c %a "$TOOLING_FS_TEST_PG_ENV")"
 if [ "$modo" != 600 ]; then
