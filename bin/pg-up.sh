@@ -121,7 +121,16 @@ fi
 mkdir -p "$TOOLING_FS_TEST_PG_DATA" && chmod 700 "$TOOLING_FS_TEST_PG_DATA" || exit 1
 
 # --- el contenedor ---------------------------------------------------------------------------
-estado="$(podman container inspect "$CONTENEDOR" --format '{{.State.Status}}' 2>/dev/null || true)"
+# «No existe» se crea; «podman no ha podido mirar» no: con inspect `|| true` se leían igual, y el
+# script decía «Creando…» y lanzaba podman-compose con podman roto.
+podman container exists "$CONTENEDOR"
+case $? in
+    0)  estado="$(podman container inspect "$CONTENEDOR" --format '{{.State.Status}}')" || {
+            echo "ERROR: no se pudo leer el estado de $CONTENEDOR." >&2; exit 1; } ;;
+    1)  estado="" ;;
+    *)  echo "ERROR: no se pudo comprobar si existe $CONTENEDOR (podman ha fallado)." >&2
+        exit 1 ;;
+esac
 case "$estado" in
     running)
         echo "$CONTENEDOR ya estaba corriendo."
