@@ -62,13 +62,20 @@ if [ ! -f "$TOOLING_FS_TEST_PG_ENV" ]; then
     mkdir -p "$(dirname "$TOOLING_FS_TEST_PG_ENV")" || exit 1
     # En una subshell con umask 077, para que el fichero nazca en 0600 y no haya un instante en que
     # otro pueda leerlo. La contraseña no pasa por ninguna variable ni argumento.
-    if ! ( umask 077
-           head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32 \
-               | { printf 'POSTGRES_PASSWORD='; cat; printf '\n'; } > "$TOOLING_FS_TEST_PG_ENV" ); then
+    #
+    # Y con noclobber (O_EXCL): dos pg-up.sh a la vez pasan los dos la comprobación de arriba, y sin
+    # esto el segundo truncaría la contraseña con la que el primero ya puede haber creado el clúster.
+    # Si al escribir ya existe, la escribió el otro: se usa la suya.
+    if ( umask 077; set -o noclobber
+         head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 32 \
+             | { printf 'POSTGRES_PASSWORD='; cat; printf '\n'; } > "$TOOLING_FS_TEST_PG_ENV" ) 2>/dev/null; then
+        echo "Contraseña del superusuario generada en $TOOLING_FS_TEST_PG_ENV (0600)."
+    elif [ -f "$TOOLING_FS_TEST_PG_ENV" ]; then
+        echo "$TOOLING_FS_TEST_PG_ENV lo ha creado otro pg-up.sh a la vez; se usa esa contraseña."
+    else
         echo "ERROR: no se pudo escribir $TOOLING_FS_TEST_PG_ENV." >&2
         exit 1
     fi
-    echo "Contraseña del superusuario generada en $TOOLING_FS_TEST_PG_ENV (0600)."
 fi
 modo="$(stat -c %a "$TOOLING_FS_TEST_PG_ENV")"
 if [ "$modo" != 600 ]; then
