@@ -22,11 +22,23 @@ class TestRunner
     /** @var string Layout del core dentro del proyecto (Mesa_FS 'src'; FS estándar '.'). */
     private $coreDir;
 
-    public function __construct(string $baseDir)
+    /** @var string 'mysql' o 'postgresql'; '' si se pidió uno que no existe. */
+    private $motor;
+
+    /**
+     * $motor elige el entorno: 'mysql' (el de siempre) o 'postgresql', que tiene su propio directorio
+     * (TESTENV_DIR_POSTGRESQL, def. TESTENV_DIR-postgresql) y construye el esquema del escenario en
+     * cada ejecución (bin/pg-esquema.php). Los dos comparten el cerrojo: cuelgan de la misma carpeta.
+     */
+    public function __construct(string $baseDir, string $motor = 'mysql')
     {
         $this->baseDir = $baseDir;
         $this->coreDir = getenv('FS_CORE_DIR') ?: 'src';
         $this->fsDir = getenv('TESTENV_DIR') ?: $baseDir . '/test-env/facturascripts';
+        $this->motor = in_array($motor, ['mysql', 'postgresql'], true) ? $motor : '';
+        if ($this->motor === 'postgresql') {
+            $this->fsDir = getenv('TESTENV_DIR_POSTGRESQL') ?: $this->fsDir . '-postgresql';
+        }
     }
 
     /**
@@ -34,6 +46,9 @@ class TestRunner
      */
     public function run(string $plugin, string $sub, string $file = ''): array
     {
+        if ($this->motor === '') {
+            return $this->fail('Motor no válido: los que hay son mysql y postgresql.');
+        }
         if (!$this->safe($plugin) || !$this->safe($sub)) {
             return $this->fail('Parámetros no válidos.');
         }
@@ -79,9 +94,20 @@ class TestRunner
             }
             self::copyDir($srcTest, $dest);
 
-            // 2) activar plugins requeridos (install-plugins.php activa uno por
+            // 2) PostgreSQL: el esquema del escenario desde «sólo el core» (activa sus plugins). Si
+            //    no se puede, phpunit no corre y el rojo dice que vino de AQUÍ, no de los tests.
+            if ($this->motor === 'postgresql') {
+                $esquema = $this->pgEsquema();
+                if (empty($esquema['ok'])) {
+                    return $this->failEsquema($esquema, ['plugin' => $plugin, 'sub' => $sub, 'file' => $file]);
+                }
+                $log[] = self::resumenEsquema($esquema);
+                $aislamiento = $esquema['aislamiento'] ?? null;
+            }
+
+            // 2) MySQL: activar plugins requeridos (install-plugins.php activa uno por
             //    ejecución y sale; lo llamamos en bucle hasta que no quede ninguno).
-            $maxIterations = 25;
+            $maxIterations = $this->motor === 'postgresql' ? 0 : 25;
             for ($i = 0; $i < $maxIterations; $i++) {
                 [, $out, ] = $this->exec('php Test/install-plugins.php');
                 $log[] = trim($out);
@@ -115,6 +141,9 @@ class TestRunner
 
         return [
             'ok' => true,
+            'motor' => $this->motor,
+            'fase' => 'phpunit',
+            'aislamiento' => $aislamiento ?? null,
             'plugin' => $plugin,
             'sub' => $sub,
             'file' => $file,
@@ -137,6 +166,9 @@ class TestRunner
      */
     public function runCore(string $path): array
     {
+        if ($this->motor === '') {
+            return $this->fail('Motor no válido: los que hay son mysql y postgresql.');
+        }
         $path = ltrim(str_replace('\\', '/', $path), '/');
         if ($path === '' || strpos($path, '..') !== false || strpos($path, "\0") !== false
             || strpos($path, 'Test/Core') !== 0) {
@@ -160,7 +192,18 @@ class TestRunner
             return $this->fail('No se pudo adquirir el lock de ejecución.');
         }
         $junit = tempnam(sys_get_temp_dir(), 'junit_') . '.xml';
+        $installLog = '';
         try {
+            // PostgreSQL: los tests del core, sobre «sólo el core».
+            if ($this->motor === 'postgresql') {
+                @file_put_contents($this->fsDir . '/Test/Plugins/install-plugins.txt', '');
+                $esquema = $this->pgEsquema();
+                if (empty($esquema['ok'])) {
+                    return $this->failEsquema($esquema, ['core' => true, 'path' => $path]);
+                }
+                $installLog = self::resumenEsquema($esquema);
+                $aislamiento = $esquema['aislamiento'] ?? null;
+            }
             // pasar la ruta como argumento hace que PHPUnit ejecute SOLO ese fichero/carpeta,
             // ignorando la testsuite del config (que apunta a Test/Plugins).
             $cmd = 'php ' . escapeshellarg('vendor/bin/phpunit')
@@ -178,12 +221,15 @@ class TestRunner
 
         return [
             'ok' => true,
+            'motor' => $this->motor,
+            'fase' => 'phpunit',
+            'aislamiento' => $aislamiento ?? null,
             'core' => true,
             'path' => $path,
             'config' => $config,
             'exitCode' => $exitCode ?? -1,
             'stdout' => $stdout ?? '',
-            'installLog' => '',
+            'installLog' => $installLog,
             'suites' => $parsed['suites'] ?? [],
             'totals' => $parsed['totals'] ?? [],
             'failed' => $parsed['failed'] ?? [],
@@ -243,6 +289,65 @@ class TestRunner
     private function fail(string $message): array
     {
         return ['ok' => false, 'error' => $message];
+    }
+
+    /** Lanza bin/pg-esquema.php sobre este entorno y devuelve su JSON (o un fallo con lo que dijo). */
+    private function pgEsquema(): array
+    {
+        $script = dirname(__DIR__, 2) . '/bin/pg-esquema.php';
+        [$rc, $out, $err] = $this->exec('php ' . escapeshellarg($script) . ' ' . escapeshellarg($this->fsDir) . ' --json');
+        $lineas = array_values(array_filter(array_map('trim', explode("\n", $out))));
+        $res = $lineas ? json_decode(end($lineas), true) : null;
+        if (!is_array($res)) {
+            return ['ok' => false, 'fase' => 'esquema', 'error' => 'pg-esquema.php no devolvió JSON (rc ' . $rc . '): '
+                . substr(trim($out . "\n" . $err), -500)];
+        }
+        return $res;
+    }
+
+    /**
+     * Un rojo del esquema, dicho como tal: `fase` = esquema, y cada error en `failed` (con su plugin y
+     * su tabla) y en `installLog`, que es lo que conserva quien guarda sólo el resumen.
+     */
+    private function failEsquema(array $esquema, array $extra): array
+    {
+        $failed = [];
+        foreach ($esquema['errores'] ?? [] as $e) {
+            $failed[] = [
+                'test' => 'esquema PostgreSQL · ' . ($e['plugin'] !== '' ? 'plugin ' . $e['plugin'] : $e['origen'])
+                    . ($e['tabla'] !== '' ? ' · tabla ' . $e['tabla'] : ''),
+                'status' => 'esquema',
+                'message' => $e['fase'] . ': ' . $e['motivo'],
+            ];
+        }
+        $guarda = $esquema['guarda']['error'] ?? '';
+        if ($guarda !== '') {
+            $failed[] = ['test' => 'esquema PostgreSQL · guarda de las claves ajenas', 'status' => 'esquema', 'message' => $guarda];
+        }
+        $error = $esquema['error'] ?? ($failed
+            ? 'El esquema del escenario no se pudo construir en PostgreSQL: el rojo viene de sus plugins, no de phpunit.'
+            : 'El esquema del escenario no se pudo construir en PostgreSQL.');
+        return array_merge(['ok' => false, 'motor' => 'postgresql', 'fase' => 'esquema', 'error' => $error,
+            'aislamiento' => $esquema['aislamiento'] ?? 'no se pudo comprobar'], $extra, [
+            'installLog' => self::resumenEsquema($esquema),
+            'failed' => $failed,
+            'esquema' => $esquema,
+        ]);
+    }
+
+    private static function resumenEsquema(array $e): string
+    {
+        $l = ['Esquema PostgreSQL (' . ($e['aislamiento'] ?? '?') . '): '
+            . (empty($e['plugins']) ? 'sólo el core' : implode(',', $e['plugins']))
+            . (isset($e['tablas']) ? " · {$e['tablas']} tablas, {$e['fk']} FK, {$e['segundos']} s" : '')];
+        foreach ($e['errores'] ?? [] as $x) {
+            $l[] = 'ERROR ' . $x['fase'] . ($x['plugin'] !== '' ? ' · ' . $x['plugin'] : '')
+                . ($x['tabla'] !== '' ? ' · ' . $x['tabla'] : '') . ': ' . $x['motivo'];
+        }
+        if (!empty($e['error'])) {
+            $l[] = 'ERROR ' . $e['error'];
+        }
+        return implode("\n", $l);
     }
 
     private function safe(string $segment): bool
