@@ -15,14 +15,16 @@
 #   TOOLING_FS_TEST_PG_ENV    fichero de la contraseña (def: ~/.config/tooling/fs-test_pg.env)
 #
 # Salida: 0 «responde» por los dos caminos; 1 «no responde», con el motivo (no hay contenedor, está
-# parado, o no contesta por un camino); 2 si la invocación es incorrecta.
+# parado, o no contesta por un camino), o «no se pudo comprobar» si no se puede leer su imagen;
+# 2 si la invocación es incorrecta.
 # =============================================================================
 set -uo pipefail
 
-CONTENEDOR="fstest-pg"
-HOSTNAME_RED="fstest-pg.asermar.com"
-RED="asermar.com"
-PUERTO=5432
+# Constantes del script, y por eso globales en mayúsculas: probar() lee PUERTO sin recibirlo.
+readonly CONTENEDOR="fstest-pg"
+readonly HOSTNAME_RED="fstest-pg.asermar.com"
+readonly RED="asermar.com"
+readonly PUERTO=5432
 
 if [ $# -gt 0 ]; then
     echo "ERROR: $0 no admite opciones (recibió: $*)." >&2
@@ -49,18 +51,24 @@ if [ ! -r "$ENV_FILE" ]; then
     echo "no responde: no puedo autenticarme, falta $ENV_FILE." >&2
     exit 1
 fi
-contrasena="$(sed -n 's/^POSTGRES_PASSWORD=//p' "$ENV_FILE" | head -n 1)"
-if [ -z "$contrasena" ]; then
+clave="$(sed -n 's/^POSTGRES_PASSWORD=//p' "$ENV_FILE" | head -n 1)"
+if [ -z "$clave" ]; then
     echo "no responde: $ENV_FILE no tiene una línea POSTGRES_PASSWORD=<algo>." >&2
     exit 1
 fi
 
 # La imagen del propio contenedor: así no hace falta red para bajar nada, y psql es de la misma versión.
-imagen="$(podman container inspect "$CONTENEDOR" --format '{{.Image}}')"
+# Si no sale, no es que no responda: es que no se ha podido comprobar, y se dice así.
+if ! imagen_pg="$(podman container inspect "$CONTENEDOR" --format '{{.Image}}' 2>/dev/null)" \
+   || [ -z "$imagen_pg" ]; then
+    echo "no se pudo comprobar: no he podido leer la imagen de $CONTENEDOR (podman container inspect)." >&2
+    exit 1
+fi
 
-# $1 = descripción del camino, $2 = red del contenedor desechable, $3 = host al que conectar.
+# $1 = descripción del camino, $2 = red del contenedor desechable, $3 = host al que conectar,
+# $4 = contraseña de postgres, $5 = imagen. Todo lo que lee lo recibe, salvo la constante PUERTO.
 probar() {
-    local camino="$1" red="$2" host="$3" version
+    local camino="$1" red="$2" host="$3" contrasena="$4" imagen="$5" version
     if version="$(PGPASSWORD="$contrasena" podman run --rm --pull=never --http-proxy=false \
                     --network "$red" -e PGPASSWORD "$imagen" \
                     psql -h "$host" -p "$PUERTO" -U postgres -d postgres -tAc 'select version()' 2>&1)"; then
@@ -72,6 +80,6 @@ probar() {
 }
 
 rc=0
-probar "la red $RED ($HOSTNAME_RED)" "$RED" "$HOSTNAME_RED" || rc=1
-probar "el host (127.0.0.1:$PUERTO)" host 127.0.0.1 || rc=1
+probar "la red $RED ($HOSTNAME_RED)" "$RED" "$HOSTNAME_RED" "$clave" "$imagen_pg" || rc=1
+probar "el host (127.0.0.1:$PUERTO)" host 127.0.0.1 "$clave" "$imagen_pg" || rc=1
 exit "$rc"
