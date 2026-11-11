@@ -107,7 +107,8 @@ if [ ! -f "$TOOLING_FS_TEST_PG_ENV" ]; then
     rm -f -- "$temporal"
     trap - EXIT
 fi
-modo="$(stat -c %a "$TOOLING_FS_TEST_PG_ENV")"
+# -L: el modo del fichero, no el del enlace si TOOLING_FS_TEST_PG_ENV es uno (un enlace siempre da 777).
+modo="$(stat -L -c %a "$TOOLING_FS_TEST_PG_ENV")"
 if [ "$modo" != 600 ]; then
     chmod 600 "$TOOLING_FS_TEST_PG_ENV" || exit 1
     echo "AVISO: $TOOLING_FS_TEST_PG_ENV estaba en $modo; queda en 600."
