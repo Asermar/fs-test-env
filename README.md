@@ -52,6 +52,10 @@ la interfaz incluidos), no requiere servidor.
 - `bin/plugin-topo-order.php` — ordena plugins por sus dependencias `require`.
 - `bin/pg-up.sh` y `bin/pg-check.sh` — levantan y comprueban el **PostgreSQL 13 compartido** del
   arnés (ver [El PostgreSQL de test](#el-postgresql-de-test)).
+- `bin/pg-esquema.php` — construye el esquema de PostgreSQL de **un escenario** desde «sólo el core»
+  (ver [Probar en PostgreSQL](#probar-en-postgresql)). Lo llaman la provisión y el runner.
+- `bin/run.sh` — ejecuta un escenario **desde el host** en el motor que se pida: levanta el
+  PostgreSQL si hace falta, provisiona el entorno de ese motor si falta y llama a la API.
 - `postgres/` — su compose y el ejemplo de su fichero de contraseña.
 - `web/` — runner web (PHP plano + JS): lista los plugins con tests, muestra la **descripción
   markdown** (`@description`) de cada test y ejecuta las suites mostrando los resultados.
@@ -305,6 +309,16 @@ rota — está diciendo que ese flag no significa lo que crees.
 
 ## Ejecutar los tests
 
+**Desde el host, en cualquiera de los dos motores**, con `bin/run.sh` desde la raíz de la copia:
+
+```bash
+$FS_TEST/bin/run.sh --plugin OkoPermisos --sub main                       # MariaDB
+$FS_TEST/bin/run.sh --motor postgresql --plugin OkoPermisos --sub main    # PostgreSQL
+```
+
+Imprime `{ok, motor, fase, aislamiento, exitCode, totals, failed, error}` y sale con 0 sólo si phpunit
+sale en verde. Con PostgreSQL ver [Probar en PostgreSQL](#probar-en-postgresql).
+
 - Web: el host configurado en `TESTENV_HOST` (runner navegable).
 - CLI: `cd <TESTENV_DIR> && vendor/bin/phpunit Plugins/<Plugin>/Test`.
 - **API HTTP** (`web/public/index.php`, `TestRunner::run()`): pensada para lanzar un escenario de
@@ -327,6 +341,8 @@ rota — está diciendo que ese flag no significa lo que crees.
     ese fichero (el resto del escenario se copia y activa igual, pero no se ejecuta).
   - `core=1` + `path=Test/Core/...` — variante para un test del **core** en vez de un plugin
     (`TestRunner::runCore()`); no copia ni activa nada.
+  - `motor` (opcional) — `mysql` (por defecto) o `postgresql`. Elige el entorno; la respuesta lleva
+    `motor` y `fase` (`phpunit`, o `esquema` si el rojo vino de construir el esquema del escenario).
 
   Devuelve JSON. En éxito (`"ok": true`):
   ```json
@@ -356,7 +372,51 @@ rota — está diciendo que ese flag no significa lo que crees.
       --data-urlencode "sub=main" | jq -c '{ok, totals, failed}'
   ```
 
+## Probar en PostgreSQL
+
+La forja de facturascripts.com rechaza los plugins que fallan en PostgreSQL. **El motor es del entorno
+de test, no de la copia**: la copia sigue con su MariaDB, y el arnés tiene un segundo entorno al lado.
+
+- **Un entorno por motor.** El de PostgreSQL está en `TESTENV_DIR_POSTGRESQL` (por defecto
+  `${TESTENV_DIR}-postgresql`), con su `config.php`, su `Dinamic/` y su `MyFiles/`: el estado de los
+  plugins vive en el disco, no en la base, así que no se puede compartir un directorio cambiando la
+  base. Los dos comparten el cerrojo (`test-env/.webrunner.lock`).
+- **El servidor es el compartido del arnés** (`fstest-pg`, ver arriba), visto desde el contenedor de
+  test como `TESTENV_PG_HOST:TESTENV_PG_PORT` (`fstest-pg.asermar.com:5432`). Usuario y clave son los
+  del `config.php` de trabajo de la copia: **la base `<TEST_DB>` y el rol los crea okoworktree desde
+  el host**, con `REVOKE CONNECT FROM PUBLIC` y sin `CREATEDB`. El arnés no los crea ni los tira:
+  `--recrear-bd` y el teardown los **vacían** (`DROP OWNED BY CURRENT_USER`), y se retiran con la copia.
+- **El esquema, por escenario y desde «sólo el core»** (`bin/pg-esquema.php`). Activar todos los
+  plugins a la vez, como en MariaDB, no puede funcionar en PostgreSQL: basta uno con SQL de MySQL para
+  que el entorno no sirva a ninguno. Así que la provisión sólo construye el core, y antes de cada
+  ejecución el runner vacía la base, borra `MyFiles/` y `Dinamic/`, activa los plugins del escenario y
+  construye su esquema, como el CI de FacturaScripts.
+- **Dos pasadas, sin y con claves ajenas.** PostgreSQL no deja crear una FK hacia una tabla que aún no
+  existe, ni a un superusuario: medido, ni el core sale en una pasada (59 tablas y 113 FK, frente a 83 y
+  223). La pasada 1 corre con `FS_TEST_SIN_FK=1`, que los scripts generados convierten en la constante
+  `db_foreign_keys` = false antes de cargar `config.php` (`Tools::config()` la busca antes que
+  `FS_DB_FOREIGN_KEYS`). La pasada 2, con ellas y sin `MyFiles/db-updater.json`, deja que DbUpdater
+  añada las que faltan. **Depende de un detalle interno del core**, y por eso se comprueba en cada
+  ejecución: 0 FK tras la pasada 1 y más de 0 tras la 2, o un error que lo dice con nombre.
+- **El negativo del aislamiento, antes de construir.** El rol de la copia NO puede conectar a
+  `fstest_centinela` (`TESTENV_PG_CENTINELA`), una base sin dueño de copia que crea okoworktree. La
+  respuesta dice `aislado`, `no aislado` o `no se pudo comprobar`, y en los dos últimos no se ejecuta
+  nada.
+- **Un rojo dice de dónde viene.** Con `fase: esquema`, cada error sale en `failed` y en `installLog`
+  con la pasada, el plugin, la tabla y el motivo que dio el servidor («type datetime does not exist»…).
+  Con `fase: phpunit`, el rojo es de los tests.
+
 ## Las baterías del arnés
+
+**`test/postgresql.sh`** — comprueba `bin/pg-esquema.php` contra el PostgreSQL de test y un entorno de
+PostgreSQL provisionado (`FS_TEST_PG_ENV=<TESTENV_DIR_POSTGRESQL>`), ejecutándolo dentro del contenedor
+de test de la copia, que es donde lo ejecuta el runner (el PHP del host no tiene `soap`, que Verifactu
+exige). Sólo el core construye; la guarda de las FK salta si se neutraliza el interruptor; un plugin
+compatible (`FS_TEST_PG_LIMPIO`, Verifactu) sale limpio; uno incompatible (`FS_TEST_PG_ROTO`,
+OpenServBus) sale con plugin, tabla y motivo; tras un escenario roto se vuelve exactamente a «sólo el
+core», sin restos en `MyFiles/` ni `Dinamic/`; y el negativo en sus tres estados. **No es
+autocontenida**: sin servidor o sin entorno dice «NO COMPROBADO» y sale con 2. **8 comprobaciones,
+unos 30 s.**
 
 **`test/registro.sh`** — comprueba el **registro de instalaciones**: que una copia hereda la
 configuración de producto de su ancla, que una instalación nueva de verdad sigue preguntando, que una
