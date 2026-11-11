@@ -51,6 +51,14 @@ if [ ! -f "$TOOLING_FS_TEST_PG_ENV" ]; then
         echo "  Recupera el fichero, o sigue «Rotar la contraseña» del README de fs-test." >&2
         exit 1
     fi
+    # Lo mismo si el contenedor ya existe: su clúster puede estar en OTRO directorio de datos (el que
+    # tenía TOOLING_FS_TEST_PG_DATA al crearlo), y entonces la comprobación de arriba no lo ve.
+    if podman container inspect "$CONTENEDOR" >/dev/null 2>&1; then
+        echo "ERROR: falta $TOOLING_FS_TEST_PG_ENV, pero el contenedor $CONTENEDOR ya existe." >&2
+        echo "  Se creó con una contraseña; una nueva no sería la suya." >&2
+        echo "  Recupera el fichero, o sigue «Rotar la contraseña» del README de fs-test." >&2
+        exit 1
+    fi
     mkdir -p "$(dirname "$TOOLING_FS_TEST_PG_ENV")" || exit 1
     # En una subshell con umask 077, para que el fichero nazca en 0600 y no haya un instante en que
     # otro pueda leerlo. La contraseña no pasa por ninguna variable ni argumento.
