@@ -63,8 +63,12 @@ TEST_DB="${TEST_DB:-fs_test}"
 #
 # Medido antes de retirarlo: NADIE lo invocaba —ni un script ni un botón—, así que no hay llamador
 # que romper.
-for _a in "$@"; do
+MOTOR=mysql
+while [ $# -gt 0 ]; do
+    _a="$1"; shift
     case "$_a" in
+        --motor=*) MOTOR="${_a#--motor=}" ;;
+        --motor)   MOTOR="${1:-}"; [ $# -gt 0 ] && shift ;;
         --keep-db)
             cat >&2 <<'FIN'
 ERROR: «--keep-db» se retiró y esta invocación NO ha hecho nada.
@@ -88,13 +92,21 @@ FIN
             ;;
         *)
             echo "ERROR: opción desconocida: '$_a'." >&2
-            echo "  Este script no acepta opciones: borra el directorio del entorno y la BD de" >&2
-            echo "  pruebas, siempre. Se rechaza en vez de ignorarse para que un flag que alguien" >&2
-            echo "  crea que significa algo no pase inadvertido." >&2
+            echo "  La única que hay es --motor <mysql|postgresql>: borra el directorio del entorno de" >&2
+            echo "  ese motor y su BD de pruebas, siempre. Se rechaza en vez de ignorarse para que un" >&2
+            echo "  flag que alguien crea que significa algo no pase inadvertido." >&2
             exit 2
             ;;
     esac
 done
+case "$MOTOR" in
+    mysql) ;;
+    # Con PostgreSQL, el entorno de ese motor; y la base NO se tira: se VACÍA (DROP OWNED), porque el
+    # rol de la copia no puede volver a crearla (no tiene CREATEDB). La base y el rol se retiran con la
+    # copia (okoworktree remove), que es quien los creó.
+    postgresql) TESTENV_DIR="${TESTENV_DIR_POSTGRESQL:-${TESTENV_DIR}-postgresql}" ;;
+    *) echo "ERROR: motor desconocido: '$MOTOR'. Los que hay: mysql, postgresql." >&2; exit 2 ;;
+esac
 
 # --- salida de progreso (coloreada + con hora), alineada con test-env-provision.sh ---
 # Color por defecto: la ventana de OkoGit no es un TTY pero renderiza ANSI; NO_COLOR
@@ -127,7 +139,11 @@ esac
 printf '%s================================================================%s\n' "$C_STEP" "$C_RESET"
 printf '%sEliminación del entorno de pruebas%s\n' "$C_STEP" "$C_RESET"
 echo "Directorio : $TESTENV_DIR"
-echo "BD test    : $TEST_DB (se elimina)"
+if [ "$MOTOR" = postgresql ]; then
+    echo "BD test    : $TEST_DB en PostgreSQL (se vacía; la base y el rol se retiran con la copia)"
+else
+    echo "BD test    : $TEST_DB (se elimina)"
+fi
 printf '%s================================================================%s\n' "$C_STEP" "$C_RESET"
 
 # --- 1) borrar el directorio del core de pruebas ---
@@ -163,6 +179,17 @@ else
         exit 1
     fi
 
+    if [ "$MOTOR" = postgresql ]; then
+    log_step "Vaciando la BD de pruebas PostgreSQL ($TEST_DB)..."
+    FS_TEST_DB_PASS="$DB_PASS" php -r '
+    $q = function ($v) { return chr(39) . addcslashes((string) $v, chr(39) . "\\") . chr(39); };
+    $c = @pg_connect("host=" . $q($argv[1]) . " port=" . $q($argv[2]) . " user=" . $q($argv[3])
+        . " password=" . $q(getenv("FS_TEST_DB_PASS")) . " dbname=" . $q($argv[4]) . " connect_timeout=10");
+    if (!$c) { fwrite(STDERR, "conexion: " . trim((string) (error_get_last()["message"] ?? "")) . "\n"); exit(1); }
+    if (!@pg_query($c, "DROP OWNED BY CURRENT_USER")) { fwrite(STDERR, "no se pudo vaciar: " . pg_last_error($c) . "\n"); exit(1); }
+    echo "   BD vaciada: " . $argv[4] . "\n";
+    ' "${TESTENV_PG_HOST:-fstest-pg.asermar.com}" "${TESTENV_PG_PORT:-5432}" "$DB_USER" "$TEST_DB"
+    else
     log_step "Eliminando la BD de pruebas ($TEST_DB)..."
     # La contraseña por ENTORNO y no en argv: `/proc/<pid>/cmdline` lo lee cualquier usuario de la
     # máquina, `/proc/<pid>/environ` sólo su dueño. Mismo motivo que en el provisionador.
@@ -173,6 +200,7 @@ else
     $m->query("DROP DATABASE IF EXISTS `$db`");
     echo "   BD eliminada: " . $argv[5] . "\n";
     ' "$DB_HOST" "$DB_PORT" "$DB_USER" "" "$TEST_DB"
+    fi
 fi
 
 echo
