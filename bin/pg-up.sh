@@ -44,6 +44,18 @@ done
 # UNA CONTRASEÑA NUEVA CON UN CLÚSTER VIEJO SERÍA MENTIRA: POSTGRES_PASSWORD sólo se aplica al crear
 # el clúster, así que si el directorio de datos ya tiene uno, generar otra dejaría en el fichero una
 # contraseña que el servidor no acepta. Se niega y dice qué hacer.
+#
+# Y antes, que el destino sea un fichero normal o no exista: si es un directorio, `ln` publicaría
+# DENTRO de él y el chmod 600 de abajo lo dejaría inatravesable (TOOLING_FS_TEST_PG_ENV=~/.config/tooling
+# es un error fácil). Un enlace a un fichero vale: -f lo sigue.
+if { [ -e "$TOOLING_FS_TEST_PG_ENV" ] || [ -L "$TOOLING_FS_TEST_PG_ENV" ]; } && [ ! -f "$TOOLING_FS_TEST_PG_ENV" ]; then
+    if [ -d "$TOOLING_FS_TEST_PG_ENV" ]; then que="un directorio"
+    elif [ ! -e "$TOOLING_FS_TEST_PG_ENV" ]; then que="un enlace roto"
+    else que="algo que no es un fichero normal"; fi
+    echo "ERROR: $TOOLING_FS_TEST_PG_ENV es $que, no es un fichero: no se toca." >&2
+    echo "  TOOLING_FS_TEST_PG_ENV tiene que nombrar el fichero de la contraseña, no su carpeta." >&2
+    exit 1
+fi
 if [ ! -f "$TOOLING_FS_TEST_PG_ENV" ]; then
     if [ -f "$TOOLING_FS_TEST_PG_DATA/PG_VERSION" ]; then
         echo "ERROR: falta $TOOLING_FS_TEST_PG_ENV, pero en $TOOLING_FS_TEST_PG_DATA ya hay un clúster." >&2
@@ -83,7 +95,8 @@ if [ ! -f "$TOOLING_FS_TEST_PG_ENV" ]; then
         echo "ERROR: no se pudo generar la contraseña; no se crea $TOOLING_FS_TEST_PG_ENV." >&2
         exit 1
     fi
-    if ln -- "$temporal" "$TOOLING_FS_TEST_PG_ENV" 2>/dev/null; then
+    # -T: el destino es ESE nombre, nunca una carpeta en la que meterlo.
+    if ln -T -- "$temporal" "$TOOLING_FS_TEST_PG_ENV" 2>/dev/null; then
         echo "Contraseña del superusuario generada en $TOOLING_FS_TEST_PG_ENV (0600)."
     elif [ -f "$TOOLING_FS_TEST_PG_ENV" ]; then
         echo "$TOOLING_FS_TEST_PG_ENV lo ha creado otro pg-up.sh a la vez; se usa esa contraseña."
