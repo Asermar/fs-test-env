@@ -181,6 +181,22 @@ printf '%s\n' '<?php' "throw new Exception('roto');" "define('FS_DB_PASS', '$CLA
 sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
 grep -qF 'No pude leer la clave' <<<"$sal" && ok "config.php que no carga: avisa de que la salida no se ha redactado" \
     || mal "con un config.php que no carga debía avisar: $sal"
+# Las formas codificadas también: un test que la imprime como JSON, escapada, en una URL o en HTML.
+CLAVE="Cl/av\"e'<&>ü x$$"
+php -r 'echo "<?php\ndefine(\"FS_DB_PASS\", " . var_export($argv[1], true) . ");\n";' "$CLAVE" > "$P/test-env/facturascripts/config.php"
+php -r '$c = var_export($argv[1], true); echo "<?php \$c = $c;\n",
+    "echo \"raw:\", \$c, \"\\n\";\n",
+    "echo \"json:\", substr(json_encode(\$c), 1, -1), \"\\n\";\n",
+    "echo \"json2:\", substr(json_encode(\$c, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 1, -1), \"\\n\";\n",
+    "echo \"slashes:\", addslashes(\$c), \"\\n\";\n",
+    "echo \"export:\", var_export(\$c, true), \"\\n\";\n",
+    "echo \"url:\", rawurlencode(\$c), \"\\n\";\n",
+    "echo \"url2:\", urlencode(\$c), \"\\n\";\n",
+    "echo \"html:\", htmlspecialchars(\$c, ENT_QUOTES), \"\\n\";\n";' "$CLAVE" > "$P/test-env/facturascripts/vendor/bin/phpunit"
+salida="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1 | php -r '$d = json_decode(stream_get_contents(STDIN), true); echo $d["stdout"] ?? "SIN JSON", "\n", isset($d["aviso"]) ? "AVISO" : "", "\n";')"
+esperada="$(printf '%s\n' 'raw:***' 'json:***' 'json2:***' 'slashes:***' "export:'***'" 'url:***' 'url2:***' 'html:***' '' 'AVISO')"
+[ "$salida" = "$esperada" ] && ok "la clave codificada (JSON, escapada, var_export, URL, HTML) también sale como ***" \
+    || mal "alguna forma codificada de la clave salió en la respuesta: $salida"
 
 # --- una ejecución pedida desde OTRA web se rechaza ---------------------------------------------
 # Ejecutar escribe en la base de pruebas: una página cualquiera abierta en el navegador no debe poder

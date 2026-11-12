@@ -342,21 +342,37 @@ class TestRunner
                 . self::CLAVE_MINIMA . ' caracteres). La salida va tal cual.';
             return $respuesta;
         }
+        // Y sus formas CODIFICADAS, que es como suele llegar si la imprime un json_encode, un var_export, una
+        // URL o un HTML.
+        $formas = array_values(array_unique(array_filter([
+            $clave,
+            substr((string) json_encode($clave), 1, -1),
+            substr((string) json_encode($clave, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 1, -1),
+            addslashes($clave),
+            substr(var_export($clave, true), 1, -1),
+            rawurlencode($clave),
+            urlencode($clave),
+            htmlspecialchars($clave, ENT_QUOTES | ENT_SUBSTITUTE),
+        ], 'strlen')));
         $vista = false;
+        $tapa = static function (&$v) use ($formas, &$vista) {
+            if (!is_string($v)) {
+                return;
+            }
+            $nueva = str_replace($formas, '***', $v);
+            if ($nueva !== $v) {
+                $v = $nueva;
+                $vista = true;
+            }
+        };
         foreach (self::CAMPOS_LIBRES as $campo) {
             if (!array_key_exists($campo, $respuesta)) {
                 continue;
             }
             if (is_array($respuesta[$campo])) {
-                array_walk_recursive($respuesta[$campo], static function (&$v) use ($clave, &$vista) {
-                    if (is_string($v) && strpos($v, $clave) !== false) {
-                        $v = str_replace($clave, '***', $v);
-                        $vista = true;
-                    }
-                });
-            } elseif (is_string($respuesta[$campo]) && strpos($respuesta[$campo], $clave) !== false) {
-                $respuesta[$campo] = str_replace($clave, '***', $respuesta[$campo]);
-                $vista = true;
+                array_walk_recursive($respuesta[$campo], $tapa);
+            } else {
+                $tapa($respuesta[$campo]);
             }
         }
         if ($vista) {
