@@ -116,6 +116,148 @@ for m in run runCore; do
     [ "$n" -eq 1 ] && ok "$m() devuelve failed" || mal "$m() no devuelve failed"
 done
 
+# --- la contraseña de la base no sale en la respuesta ----------------------------------------
+# Se mira la SALIDA, no quién la imprime: un phpunit de pega que la escribe (como haría el bootstrap del
+# core, un Init o un test) y la respuesta no tiene que llevarla, sino «***» y un aviso. Contra TestRunner
+# REAL. Para PostgreSQL, una copia del arnés con un pg-esquema.php de pega cuyo JSON la lleva.
+printf '\n\033[1;36m— la contraseña de la base no sale en la respuesta —\033[0m\n'
+CLAVE="ClaveDePrueba$$"
+P="$BASE/proyecto"
+for E in "$P/test-env/facturascripts" "$P/test-env/facturascripts-postgresql"; do
+    mkdir -p "$E/Core" "$E/vendor/bin" "$E/Test/Core" "$E/Test/Plugins"
+    : > "$E/Core/Kernel.php"; : > "$E/Test/Core/PegaTest.php"; printf '<?php\n' > "$E/vendor/bin/phpunit"
+    printf '%s\n' '<?php' "define('FS_DB_PASS', '$CLAVE');" > "$E/config.php"
+done
+mkdir -p "$P/src/Plugins/Pega/Test/main"
+A="$BASE/arnes"; mkdir -p "$A/web/src" "$A/bin"; cp "$T"/web/src/*.php "$A/web/src/"
+printf '%s\n' '<?php' "echo json_encode(['ok' => false, 'error' => 'el Init de Pega dijo $CLAVE', 'errores' => []]), \"\\n\";" > "$A/bin/pg-esquema.php"
+cat > "$BASE/bootstrap.php" <<'PHP'
+<?php
+[, $arnes, $proyecto, $motor, $que] = $argv;
+require $arnes . '/web/src/JUnitParser.php';
+require $arnes . '/web/src/TestRunner.php';
+$t = new TestWeb\TestRunner($proyecto, $motor);
+echo json_encode($que === 'core' ? $t->runCore('Test/Core/PegaTest.php') : $t->run('Pega', 'main')), "\n";
+PHP
+vuelca() { printf '%s\n' '<?php' "echo 'Clave: ' . '$CLAVE' . \"\\n\";" > "$P/test-env/facturascripts/vendor/bin/phpunit"; }
+callado() { printf '%s\n' '<?php' "echo \"nada que ver\\n\";" > "$P/test-env/facturascripts/vendor/bin/phpunit"; }
+redactada() { ! grep -qF "$CLAVE" <<<"$sal" && grep -qF '***' <<<"$sal" && grep -qF '"aviso"' <<<"$sal"; }
+vuelca
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
+redactada && ok "run(): un test que imprime la clave sale con *** y aviso, sin la clave" || mal "run() devolvió la clave o no avisó: $sal"
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql core 2>&1)"
+redactada && ok "runCore(): lo mismo" || mal "runCore() devolvió la clave o no avisó: $sal"
+callado
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
+! grep -qF '"aviso"' <<<"$sal" && grep -qF 'nada que ver' <<<"$sal" && ok "control: sin la clave en la salida, ni aviso ni nada cambiado" \
+    || mal "control: run() avisa o cambia la salida sin motivo: $sal"
+sal="$(php "$BASE/bootstrap.php" "$A" "$P" postgresql run 2>&1)"
+redactada && grep -qF '"fase":"esquema"' <<<"$sal" && ok "PostgreSQL: la clave en lo que devuelve pg-esquema tampoco sale" \
+    || mal "PostgreSQL: la respuesta del esquema llevaba la clave o no avisó: $sal"
+sal="$(php "$BASE/bootstrap.php" "$A" "$P" postgresql core 2>&1)"
+redactada && ok "PostgreSQL, runCore(): tampoco" || mal "PostgreSQL runCore() llevaba la clave: $sal"
+# Sólo los campos de texto libre: una clave que coincide con parte del nombre de la configuración no la
+# cambia (la respuesta mentiría sobre qué se ejecutó), pero sí se redacta en stdout.
+pon_clave() { printf '%s\n' '<?php' "define('FS_DB_PASS', '$1');" > "$P/test-env/facturascripts/config.php"; }
+CLAVE=unit-plugins; pon_clave "$CLAVE"; vuelca
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
+grep -qF '"config":"phpunit-plugins.xml"' <<<"$sal" && grep -qF '"stdout":"Clave: ***' <<<"$sal" \
+    && ok "la clave sólo se redacta en el texto libre: config sigue diciendo phpunit-plugins.xml" \
+    || mal "la redacción tocó un campo que no es texto libre o no redactó stdout: $sal"
+# Una clave corta no se redacta (taparía trozos de cualquier texto): se avisa de que no se pudo comprobar.
+CLAVE=corta1; pon_clave "$CLAVE"; vuelca
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
+grep -qF 'clave demasiado corta para redactarla' <<<"$sal" && grep -qF "Clave: $CLAVE" <<<"$sal" \
+    && ok "clave de menos de 8: no se redacta y avisa de que no se pudo comprobar" \
+    || mal "con una clave corta debía avisar sin redactar: $sal"
+# La clave se lee cargando el config.php en un subproceso: vale cualquier forma de escribirla.
+CLAVE="ClaveDePrueba$$"
+printf '%s\n' '<?php' "DEFINE(\"FS_DB_PASS\", \"Clave\" . \"DePrueba$$\");" > "$P/test-env/facturascripts/config.php"; vuelca
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
+redactada && ok "config.php con DEFINE, comillas dobles y concatenación: se lee y se redacta" \
+    || mal "con otra forma de definir la clave no la redactó: $sal"
+# Y si lo menciona pero no se puede cargar, se dice: la salida va sin redactar.
+printf '%s\n' '<?php' "throw new Exception('roto');" "define('FS_DB_PASS', '$CLAVE');" > "$P/test-env/facturascripts/config.php"
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
+grep -qF 'No pude leer la clave' <<<"$sal" && ok "config.php que no carga: avisa de que la salida no se ha redactado" \
+    || mal "con un config.php que no carga debía avisar: $sal"
+# Las formas codificadas también: un test que la imprime como JSON, escapada, en una URL o en HTML.
+CLAVE="Cl/av\"e'<&>ü x$$"
+php -r 'echo "<?php\ndefine(\"FS_DB_PASS\", " . var_export($argv[1], true) . ");\n";' "$CLAVE" > "$P/test-env/facturascripts/config.php"
+php -r '$c = var_export($argv[1], true); echo "<?php \$c = $c;\n",
+    "echo \"raw:\", \$c, \"\\n\";\n",
+    "echo \"json:\", substr(json_encode(\$c), 1, -1), \"\\n\";\n",
+    "echo \"json2:\", substr(json_encode(\$c, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 1, -1), \"\\n\";\n",
+    "echo \"slashes:\", addslashes(\$c), \"\\n\";\n",
+    "echo \"export:\", var_export(\$c, true), \"\\n\";\n",
+    "echo \"url:\", rawurlencode(\$c), \"\\n\";\n",
+    "echo \"url2:\", urlencode(\$c), \"\\n\";\n",
+    "echo \"html:\", htmlspecialchars(\$c, ENT_QUOTES), \"\\n\";\n";' "$CLAVE" > "$P/test-env/facturascripts/vendor/bin/phpunit"
+salida="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1 | php -r '$d = json_decode(stream_get_contents(STDIN), true); echo $d["stdout"] ?? "SIN JSON", "\n", isset($d["aviso"]) ? "AVISO" : "", "\n";')"
+esperada="$(printf '%s\n' 'raw:***' 'json:***' 'json2:***' 'slashes:***' "export:'***'" 'url:***' 'url2:***' 'html:***' '' 'AVISO')"
+[ "$salida" = "$esperada" ] && ok "la clave codificada (JSON, escapada, var_export, URL, HTML) también sale como ***" \
+    || mal "alguna forma codificada de la clave salió en la respuesta: $salida"
+
+# --- la web enseña el aviso del runner ---------------------------------------------------------
+# Contra el app.js REAL, cargado en node con un document de pega: resultSummary pinta el aviso (y sólo si
+# lo hay), y runTests/runCoreTests lo añaden al error cuando la respuesta es ok:false. Sin node, se dice.
+printf '\n\033[1;36m— la web enseña el aviso del runner —\033[0m\n'
+if command -v node >/dev/null; then
+    cat > "$BASE/prueba-app.js" <<'JS'
+const fs = require('fs'), vm = require('vm');
+const stub = new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => '' : stub), apply: () => stub, construct: () => stub, set: () => true });
+const nodo = (tag) => ({ tag, className: '', textContent: '', children: [], appendChild(c) { this.children.push(c); return c; }, setAttribute() {}, addEventListener() {}, classList: stub });
+const document = new Proxy({ createElement: nodo, createTextNode: (t) => ({ textContent: t, children: [] }) }, { get: (o, k) => (k in o ? o[k] : stub) });
+const ctx = vm.createContext({ document, window: stub, localStorage: stub, fetch: stub, console, setTimeout: stub, URLSearchParams: stub, location: stub, history: stub, navigator: stub });
+vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), ctx);
+const texto = (n) => (n.textContent || '') + ' ' + (n.children || []).map(texto).join(' ');
+const con = ctx.resultSummary({ totals: {}, aviso: 'AVISO-DE-PRUEBA' }), sin = ctx.resultSummary({ totals: {} });
+const avisoCon = con.children.find((c) => c.className === 'aviso-box'), avisoSin = sin.children.find((c) => c.className === 'aviso-box');
+console.log(avisoCon && texto(avisoCon).includes('AVISO-DE-PRUEBA') ? 'con-aviso' : 'falta-aviso', avisoSin ? 'aviso-de-sobra' : 'sin-aviso');
+ctx.fetch = async () => ({ json: async () => ({ ok: false, error: 'ERROR-DE-PRUEBA', aviso: 'AVISO-DE-PRUEBA' }) });
+ctx.URLSearchParams = function () {};
+(async () => {
+    for (const f of ['runTests', 'runCoreTests']) {
+        const slot = { body: nodo('div'), badge: nodo('span'), card: nodo('div'), header: nodo('div'), details: nodo('details'), title: nodo('span') };
+        await (f === 'runTests' ? ctx.runTests('P', 'main', '', null, slot) : ctx.runCoreTests('Test/Core/X.php', null, slot));
+        console.log(f, texto(slot.body).includes('AVISO-DE-PRUEBA') ? 'error-con-aviso' : 'error-sin-aviso: ' + texto(slot.body));
+    }
+})();
+JS
+    sal="$(node "$BASE/prueba-app.js" "$T/web/public/assets/app.js" 2>&1)"
+    grep -qx 'con-aviso sin-aviso' <<<"$sal" && ok "el resumen pinta el aviso cuando lo hay, y no cuando no" || mal "el resumen no pinta bien el aviso: $sal"
+    grep -qx 'runTests error-con-aviso' <<<"$sal" && grep -qx 'runCoreTests error-con-aviso' <<<"$sal" \
+        && ok "con ok:false, el error de runTests y runCoreTests lleva el aviso" || mal "el error no lleva el aviso: $sal"
+else
+    printf '  \033[1;33m?\033[0m %s\n' "NO COMPROBADO: falta node; el aviso de la web no se ha probado."
+fi
+
+# --- una ejecución pedida desde OTRA web se rechaza ---------------------------------------------
+# Ejecutar escribe en la base de pruebas: una página cualquiera abierta en el navegador no debe poder
+# lanzarlo por POST. Contra el `TestRunner::rechazoCruzado()` REAL, con las cabeceras que manda cada
+# cliente: la página del runner (mismo origen), curl o run.sh (ninguna) y otra web.
+printf '\n\033[1;36m— peticiones de otra web —\033[0m\n'
+cat > "$BASE/origen.php" <<'PHP'
+<?php
+[, $arnes] = $argv;
+require $arnes . '/web/src/TestRunner.php';
+$h = ['HTTP_HOST' => 'runner.ejemplo'];
+foreach ([
+    'curl'      => $h,
+    'pagina'    => $h + ['HTTP_SEC_FETCH_SITE' => 'same-origin', 'HTTP_ORIGIN' => 'https://runner.ejemplo'],
+    'otra'      => $h + ['HTTP_ORIGIN' => 'https://otra.ejemplo'],
+    'cruzada'   => $h + ['HTTP_SEC_FETCH_SITE' => 'cross-site'],
+    'nulo'      => $h + ['HTTP_ORIGIN' => 'null'],
+] as $caso => $server) {
+    echo $caso, '=', TestWeb\TestRunner::rechazoCruzado($server) === '' ? 'pasa' : 'rechaza', "\n";
+}
+PHP
+org="$(php "$BASE/origen.php" "$T" 2>&1)"
+for esperado in curl=pasa pagina=pasa otra=rechaza cruzada=rechaza nulo=rechaza; do
+    grep -qxF "$esperado" <<<"$org" && ok "origen: $esperado" || mal "origen: se esperaba $esperado: $org"
+done
+grep -q 'rechazoCruzado(\$_SERVER)' "$T/web/public/index.php" && ok "index.php lo consulta antes de action=run" || mal "index.php no consulta rechazoCruzado"
+
 printf '\n'
 [ "$FALLOS" -eq 0 ] && { printf '\033[1;32m%s comprobaciones, todas en verde.\033[0m\n' "$OK"; exit 0; }
 printf '\033[1;31m%s en verde, %s FALLIDAS.\033[0m\n' "$OK" "$FALLOS"; exit 1

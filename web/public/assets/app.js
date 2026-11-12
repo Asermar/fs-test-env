@@ -655,7 +655,7 @@ async function runTests(plugin, sub, file, btn, slot) {
         const body = new URLSearchParams({ plugin, sub, file: file || '' });
         const res = await fetch('?action=run', { method: 'POST', body });
         const data = await res.json();
-        if (!data.ok) { slot.body.innerHTML = ''; throw new Error(data.error || 'Error de ejecución'); }
+        if (!data.ok) { slot.body.innerHTML = ''; throw new Error((data.error || 'Error de ejecución') + (data.aviso ? ' — ⚠ ' + data.aviso : '')); }
         showResult(slot, data);
         slotDone(slot, data);
         return data;
@@ -680,7 +680,7 @@ async function runCoreTests(path, btn, slot) {
         const body = new URLSearchParams({ core: '1', path });
         const res = await fetch('?action=run', { method: 'POST', body });
         const data = await res.json();
-        if (!data.ok) { slot.body.innerHTML = ''; throw new Error(data.error || 'Error de ejecución'); }
+        if (!data.ok) { slot.body.innerHTML = ''; throw new Error((data.error || 'Error de ejecución') + (data.aviso ? ' — ⚠ ' + data.aviso : '')); }
         showResult(slot, data);
         slotDone(slot, data);
         return data;
@@ -742,7 +742,9 @@ function resultSummary(data) {
         el('span', { class: 'chip fail', text: `${(t.fail || 0) + (t.error || 0)} fallos` }),
         el('span', { class: 'chip skip', text: `${t.skip || 0} omitidos` }),
         el('span', { class: 'chip', text: `${t.assertions || 0} aserciones` }),
-        el('span', { class: 'chip', text: fmtTime(t.time || 0) })
+        el('span', { class: 'chip', text: fmtTime(t.time || 0) }),
+        // el runner avisa, por ejemplo, de que redactó la clave de la base en la salida
+        data.aviso ? el('div', { class: 'aviso-box', text: '⚠ ' + data.aviso }) : null
     ]);
 }
 

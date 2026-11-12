@@ -34,6 +34,12 @@
 #                       limpia, indistinguible de una recién creada. Eso es lo que se quiere: que
 #                       una base refrescada y una nueva no difieran en nada.
 #   --en-el-principal   escape para provisionar en el checkout PRINCIPAL (ver más abajo; avisa).
+#   --motor <m>         motor de la BD de pruebas: `mysql` (def.) o `postgresql`. Cada motor tiene su
+#                       propio entorno: el de PostgreSQL va en TESTENV_DIR_POSTGRESQL (def.
+#                       `${TESTENV_DIR}-postgresql`), con su config.php, su Dinamic/ y su MyFiles/,
+#                       porque el estado de los plugins vive en el disco y no en la base. La base y el
+#                       rol de PostgreSQL los crea okoworktree desde el host (el rol no tiene CREATEDB):
+#                       aquí sólo se comprueba que existen y, con --recrear-bd, se vacía.
 #
 # Lo que no se reconozca hace FALLAR la invocación (rc 2) en vez de ignorarse. El motivo está
 # junto al parseo, y es el modo de fallo de --recrear-bd: un typo que se tragara provisionaría
@@ -66,6 +72,7 @@ FS_PROJECT_ROOT="${FS_PROJECT_ROOT:-$PWD}"
 # =================================================================================================
 PERMITIR_PRINCIPAL=0
 RECREAR_BD=0
+MOTOR=mysql
 # LO QUE NO RECONOCEMOS SE RECHAZA, y no es celo: es el modo de fallo de `--recrear-bd`.
 #
 # Hasta ahora un argumento desconocido se IGNORABA en silencio — medido: `--basura` daba rc y salida
@@ -79,22 +86,30 @@ RECREAR_BD=0
 # Medido antes de cerrar la puerta: hoy NADIE le pasa argumentos —el compose de los dos clientes, las
 # dos plantillas, `setup-test-env.sh` y `okoworktree` lo invocan pelado—, así que no hay llamador que
 # romper.
-for _a in "$@"; do
+while [ $# -gt 0 ]; do
+    _a="$1"; shift
     case "$_a" in
         --en-el-principal) PERMITIR_PRINCIPAL=1 ;;
         --recrear-bd)      RECREAR_BD=1 ;;
+        --motor=*)         MOTOR="${_a#--motor=}" ;;
+        --motor)           MOTOR="${1:-}"; [ $# -gt 0 ] && shift ;;
         *)
             echo "ERROR: opción desconocida: '$_a'." >&2
             echo "  Las que hay:" >&2
             echo "    --recrear-bd        tira la BD de pruebas y la vuelve a crear vacía, conservando" >&2
             echo "                        el clon del core y su vendor; el esquema se rehace después." >&2
             echo "    --en-el-principal   escape para provisionar en el checkout principal (avisa)." >&2
+            echo "    --motor <m>         mysql (def.) o postgresql." >&2
             echo "  No se ignora a propósito: un '--recrear-bd' mal escrito provisionaría sin" >&2
             echo "  refrescar la base y saldría 0, y el siguiente 'verde' sería sobre datos viejos." >&2
             exit 2
             ;;
     esac
 done
+case "$MOTOR" in
+    mysql|postgresql) ;;
+    *) echo "ERROR: motor desconocido: '$MOTOR'. Los que hay: mysql, postgresql." >&2; exit 2 ;;
+esac
 
 if ancla_es_principal "$FS_PROJECT_ROOT" && [ "$PERMITIR_PRINCIPAL" = 0 ]; then
     ancla_niega "$FS_PROJECT_ROOT" "$(registro_id_de "$FS_PROJECT_ROOT" 2>/dev/null || true)" \
@@ -124,6 +139,9 @@ CORE_ROOT="$FS_PROJECT_ROOT/$FS_CORE_DIR"
 SRC_CONFIG="$CORE_ROOT/config.php"
 PLUGINS_SRC="$CORE_ROOT/Plugins"
 TESTENV_DIR="${TESTENV_DIR:-$FS_PROJECT_ROOT/test-env/facturascripts}"
+if [ "$MOTOR" = postgresql ]; then
+    TESTENV_DIR="${TESTENV_DIR_POSTGRESQL:-${TESTENV_DIR}-postgresql}"
+fi
 
 CORE_REPO="${CORE_REPO:-https://github.com/NeoRazorX/facturascripts.git}"
 # rama o tag del core; vacío/no definido => el tag de la versión instalada (v<Kernel::version()>),
@@ -170,6 +188,12 @@ DB_PORT="$(cfg FS_DB_PORT)"
 DB_USER="$(cfg FS_DB_USER)"
 DB_PASS="$(cfg FS_DB_PASS)"
 DB_WORK="$(cfg FS_DB_NAME)"
+# Con PostgreSQL, el usuario y la clave son los mismos (okoworktree crea el rol con ellos), y el
+# servidor es el compartido del arnés, visto desde el contenedor de test.
+if [ "$MOTOR" = postgresql ]; then
+    DB_HOST="${TESTENV_PG_HOST:-fstest-pg.asermar.com}"
+    DB_PORT="${TESTENV_PG_PORT:-5432}"
+fi
 
 # salvaguarda: nunca la BD de trabajo
 if [ "$TEST_DB" = "$DB_WORK" ]; then
@@ -294,6 +318,44 @@ fi
 # Un fallo reportado como éxito. Así que se mira cada retorno y, al recrear, se PREGUNTA POR
 # CONSULTA que la base quedó vacía: es la postcondición, y es lo único que distingue «la refresqué»
 # de «creí refrescarla».
+if [ "$MOTOR" = postgresql ]; then
+# CON POSTGRESQL NO SE CREA NI SE TIRA LA BASE: el rol de la copia es dueño de su base pero no tiene
+# CREATEDB, y la base (con REVOKE CONNECT FROM PUBLIC) la crea okoworktree desde el host, que es el
+# único con el admin. Aquí se comprueba que se puede conectar y, con --recrear-bd, se VACÍA con
+# `DROP OWNED BY CURRENT_USER`, que no necesita superusuario. La postcondición es la misma que en
+# MySQL: una consulta que dice 0 tablas. (Sin comillas simples dentro del PHP: viaja entre las de bash.)
+if [ "$RECREAR_BD" -eq 1 ]; then
+    log_step "Vaciando la BD de pruebas PostgreSQL ($TEST_DB): DROP OWNED..."
+else
+    log_step "Comprobando la BD de pruebas PostgreSQL ($TEST_DB)..."
+fi
+FS_TEST_DB_PASS="$DB_PASS" php -r '
+$q = function ($v) { return chr(39) . addcslashes((string) $v, chr(39) . "\\") . chr(39); };
+$c = @pg_connect("host=" . $q($argv[1]) . " port=" . $q($argv[2]) . " user=" . $q($argv[3])
+    . " password=" . $q(getenv("FS_TEST_DB_PASS")) . " dbname=" . $q($argv[4]) . " connect_timeout=10");
+if (!$c) {
+    $e = error_get_last();
+    fwrite(STDERR, "ERROR: no puedo conectar a la BD de pruebas «$argv[4]» en $argv[1]:$argv[2] como $argv[3].\n");
+    fwrite(STDERR, "  " . trim((string) ($e["message"] ?? "")) . "\n");
+    fwrite(STDERR, "  La base y el rol los crea okoworktree desde el host:  okoworktree up <copia>\n");
+    fwrite(STDERR, "  y el servidor tiene que estar arriba:  <fs-test>/bin/pg-up.sh (en el host)\n");
+    exit(1);
+}
+if ($argv[5] !== "1") { echo "   BD lista: $argv[4]\n"; exit(0); }
+if (!@pg_query($c, "DROP OWNED BY CURRENT_USER")) {
+    fwrite(STDERR, "ERROR: no se pudo vaciar la BD de pruebas: " . pg_last_error($c) . "\n");
+    exit(1);
+}
+$r = @pg_query($c, "SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()");
+if (!$r) { fwrite(STDERR, "ERROR: no pude comprobar que la BD quedó vacía: " . pg_last_error($c) . "\n"); exit(1); }
+$n = (int) pg_fetch_row($r)[0];
+if ($n !== 0) {
+    fwrite(STDERR, "ERROR: la BD «$argv[4]» conserva $n tabla(s) tras el DROP OWNED.\n");
+    exit(1);
+}
+echo "   BD vaciada (0 tablas): $argv[4]\n";
+' "$DB_HOST" "$DB_PORT" "$DB_USER" "$TEST_DB" "$RECREAR_BD"
+else
 if [ "$RECREAR_BD" -eq 1 ]; then
     log_step "Recreando la BD de pruebas ($TEST_DB): DROP + CREATE..."
 else
@@ -351,9 +413,29 @@ if ($n !== 0) {
 }
 echo "   BD recreada y vacía (0 tablas): $argv[5]\n";
 ' "$DB_HOST" "$DB_PORT" "$DB_USER" "" "$TEST_DB" "$RECREAR_BD"
+fi
 
 # --- 4) config.php del core apuntando a la BD de pruebas ---
-log_step "Escribiendo config.php de pruebas..."
+log_step "Escribiendo config.php de pruebas ($MOTOR)..."
+if [ "$MOTOR" = postgresql ]; then
+# Como el del CI del core oficial para PostgreSQL: el mismo, sin FS_MYSQL_*.
+cat > "$TESTENV_DIR/config.php" <<PHP
+<?php
+define('FS_COOKIES_EXPIRE', 31536000);
+define('FS_ROUTE', '');
+define('FS_DB_FOREIGN_KEYS', true);
+define('FS_DB_TYPE_CHECK', true);
+define('FS_LANG', '$FS_LANG');
+define('FS_TIMEZONE', '$FS_TIMEZONE');
+define('FS_DB_TYPE', 'postgresql');
+define('FS_DB_HOST', '$DB_HOST');
+define('FS_DB_PORT', '$DB_PORT');
+define('FS_DB_NAME', '$TEST_DB');
+define('FS_DB_USER', '$DB_USER');
+define('FS_DB_PASS', '$DB_PASS');
+define('FS_DEBUG', true);
+PHP
+else
 cat > "$TESTENV_DIR/config.php" <<PHP
 <?php
 define('FS_COOKIES_EXPIRE', 31536000);
@@ -372,6 +454,7 @@ define('FS_DB_USER', '$DB_USER');
 define('FS_DB_PASS', '$DB_PASS');
 define('FS_DEBUG', true);
 PHP
+fi
 
 # --- 5) enlazar los plugins ---
 log_step "Enlazando plugins..."
@@ -455,15 +538,27 @@ BOOTSTRAP="$TESTENV_DIR/Test/bootstrap.php"
 # cuando falta `Plugins::init()`, mientras que el `echo` vuelve en CADA actualización del core (el
 # paso 2 hace `git checkout --` de este fichero antes de parchearlo), así que hay que quitarlo
 # siempre. Es idempotente: si ya no está, no hace nada.
-if [ -f "$BOOTSTRAP" ] && grep -q "DB Pass" "$BOOTSTRAP"; then
-    log_step "Quitando del bootstrap el volcado de la contraseña (viene del core)..."
-    tmp_bs="$(mktemp)"
-    grep -v "DB Pass" "$BOOTSTRAP" > "$tmp_bs" && mv "$tmp_bs" "$BOOTSTRAP"
-    if grep -q "DB Pass" "$BOOTSTRAP"; then
-        echo "ERROR: no se pudo quitar la contraseña del bootstrap; los tests la imprimirán." >&2
-        exit 1
+#
+# Se quita de CADA bootstrap que nombre una configuración de PHPUnit del entorno (phpunit.xml carga
+# Test/bootstrap.php; phpunit-plugins.xml y phpunit-webrunner.xml, Test/test-plugins.php), y SÓLO LA LÍNEA
+# QUE LA IMPRIME (echo o print con FS_DB_PASS): si un core futuro usara la constante en otra línea,
+# borrarla rompería el bootstrap. SÓLO CUBRE ESA FORMA, la del core: un printf, un include o una
+# concatenación en otra línea pasan, y no se amplía a propósito (cada forma nueva es un borde más). La red
+# es el runner, que redacta la clave de toda salida que devuelve, la imprima quien la imprima. Y esa red
+# NO protege un phpunit lanzado a mano en el entorno: ahí lo que imprima el bootstrap sale tal cual.
+while IFS= read -r bs; do
+    f="$TESTENV_DIR/$bs"
+    if [ -f "$f" ] && grep -qE '^[[:space:]]*(echo|print)\b.*FS_DB_PASS' "$f"; then
+        log_step "Quitando de $bs el volcado de la contraseña (viene del core)..."
+        tmp_bs="$(mktemp)"
+        grep -vE '^[[:space:]]*(echo|print)\b.*FS_DB_PASS' "$f" > "$tmp_bs" && cat "$tmp_bs" > "$f"
+        rm -f "$tmp_bs"
+        if grep -qE '^[[:space:]]*(echo|print)\b.*FS_DB_PASS' "$f"; then
+            echo "ERROR: no se pudo quitar la contraseña de $bs; los tests la imprimirán." >&2
+            exit 1
+        fi
     fi
-fi
+done < <(sed -n 's/.*bootstrap="\([^"]*\)".*/\1/p' "$TESTENV_DIR"/phpunit*.xml 2>/dev/null | sort -u)
 
 if [ -f "$BOOTSTRAP" ] && ! grep -q "Plugins::init()" "$BOOTSTRAP"; then
     log_step "Parcheando Test/bootstrap.php (Plugins::init)..."
@@ -517,6 +612,13 @@ use FacturaScripts\Core\Kernel;
 use FacturaScripts\Core\Plugins;
 
 define('FS_FOLDER', getcwd());
+// FS_TEST_SIN_FK=1 crea el esquema SIN claves ajenas (lo usa bin/pg-esquema.sh en su primera pasada:
+// PostgreSQL no deja crear una FK hacia una tabla que aún no existe). Funciona porque Tools::config()
+// busca `db_foreign_keys` ANTES que FS_DB_FOREIGN_KEYS, y por eso va antes de cargar config.php. Si el
+// core cambiara ese orden, pg-esquema.sh lo detecta (cuenta las FK tras esta pasada) y lo dice.
+if (getenv('FS_TEST_SIN_FK') === '1') {
+    define('db_foreign_keys', false);
+}
 require_once __DIR__ . '/vendor/autoload.php';
 
 $config = FS_FOLDER . '/config.php';
@@ -530,12 +632,50 @@ require_once $config;
 // creada, fallaría por el orden (una tabla referencia otra que aún no existe).
 $db = new DataBase();
 $db->connect();
-$db->exec('SET FOREIGN_KEY_CHECKS=0');
+// Sólo en MySQL: PostgreSQL no tiene un interruptor así para un rol que no es superusuario, y el
+// orden lo resuelven las dos rondas de warm-up (ver la orquestación del paso 10).
+$esMysql = strtolower((string) FS_DB_TYPE) === 'mysql';
+if ($esMysql) {
+    $db->exec('SET FOREIGN_KEY_CHECKS=0');
+}
+
+// En PostgreSQL, el MOTIVO de cada fallo (el error que da el servidor, «type datetime does not
+// exist»…) lo guarda el core en MiniLog, canal `database`; se imprime junto al fallo para que un rojo
+// diga qué y dónde. En MySQL la salida no cambia.
+$motivos = function () use ($esMysql) {
+    if ($esMysql) {
+        return;
+    }
+    foreach (\FacturaScripts\Core\Base\MiniLog::read('database', ['error', 'critical']) as $l) {
+        echo '  MOTIVO ' . $l['message'] . "\n";
+    }
+    \FacturaScripts\Core\Base\MiniLog::clear('database');
+};
 
 Cache::clear();
 Kernel::init();
-Plugins::init();
-Plugins::deploy();
+if ($esMysql) {
+    Plugins::init();
+    Plugins::deploy();
+} else {
+    // Y en PostgreSQL, que un Init::update que falla no corte el informe: se anota y se sigue.
+    try {
+        Plugins::init();
+        Plugins::deploy();
+    } catch (\Throwable $e) {
+        // La excepción no dice de qué plugin viene; su traza sí: el primer fichero bajo Plugins/<X>/.
+        $origen = '';
+        foreach (array_merge([['file' => $e->getFile()]], $e->getTrace()) as $marco) {
+            if (preg_match('#/Plugins/([^/]+)/#', (string) ($marco['file'] ?? ''), $pm)) {
+                $origen = ' [' . $pm[1] . ']';
+                break;
+            }
+        }
+        // El salto DELANTE: si el plugin escribió algo sin terminar en salto, el FAIL no se le pega.
+        echo "\n" . 'FAIL Plugins::init' . $origen . ': ' . $e->getMessage() . "\n";
+        $motivos();
+    }
+}
 
 $ok = 0;
 $fail = 0;
@@ -553,12 +693,15 @@ foreach (glob(FS_FOLDER . '/Dinamic/Model/*.php') as $file) {
         $ok++;
     } catch (\Throwable $e) {
         $fail++;
-        echo 'FAIL ' . $class . ': ' . $e->getMessage() . "\n";
+        echo "\n" . 'FAIL ' . $class . ': ' . $e->getMessage() . "\n";
+        $motivos();
     }
 }
 
-$db->exec('SET FOREIGN_KEY_CHECKS=1');
-echo "   Tablas verificadas/creadas. OK=$ok FAIL=$fail\n";
+if ($esMysql) {
+    $db->exec('SET FOREIGN_KEY_CHECKS=1');
+}
+echo "\n   Tablas verificadas/creadas. OK=$ok FAIL=$fail\n";
 PHP
 
 # --- 9b) generar Test/install-plugins.php (versión "sincronizar al conjunto exacto") ---
@@ -586,6 +729,13 @@ use FacturaScripts\Core\Kernel;
 use FacturaScripts\Core\Plugins;
 
 define('FS_FOLDER', getcwd());
+// FS_TEST_SIN_FK=1 crea el esquema SIN claves ajenas (lo usa bin/pg-esquema.sh en su primera pasada:
+// PostgreSQL no deja crear una FK hacia una tabla que aún no existe). Funciona porque Tools::config()
+// busca `db_foreign_keys` ANTES que FS_DB_FOREIGN_KEYS, y por eso va antes de cargar config.php. Si el
+// core cambiara ese orden, pg-esquema.sh lo detecta (cuenta las FK tras esta pasada) y lo dice.
+if (getenv('FS_TEST_SIN_FK') === '1') {
+    define('db_foreign_keys', false);
+}
 require_once FS_FOLDER . '/vendor/autoload.php';
 
 $config = FS_FOLDER . '/config.php';
@@ -659,16 +809,37 @@ foreach ($current as $name) {
 }
 
 // 2) activamos en el orden ya resuelto (lista + dependencias).
+// En PostgreSQL, lo que un plugin rompa en la base al activarse (su Init) queda en MiniLog: se vacía
+// antes de cada enable() y se lee después, así que lo que haya es de ESE plugin. En MySQL no cambia.
+$esPgsql = strtolower((string) FS_DB_TYPE) === 'postgresql';
 foreach ($activationOrder as $plugin) {
+    if ($esPgsql) {
+        \FacturaScripts\Core\Base\MiniLog::clear('database');
+    }
     if (null === Plugins::get($plugin)) {
         echo '-> Plugin ' . $plugin . ' no localizado.' . PHP_EOL;
         $db->close();
         exit(2);
     }
-    if (!Plugins::enable($plugin)) {
+    try {
+        $activado = Plugins::enable($plugin);
+    } catch (\Throwable $e) {
+        if (!$esPgsql) {
+            throw $e;
+        }
+        echo 'BD ' . $plugin . ': excepción al activarlo: ' . $e->getMessage() . PHP_EOL;
+        continue;
+    }
+    if (!$activado) {
         echo '-> No se pudo activar ' . $plugin . ': revisa sus dependencias en install-plugins.txt.' . PHP_EOL;
         $db->close();
         exit(3);
+    }
+    if ($esPgsql) {
+        foreach (\FacturaScripts\Core\Base\MiniLog::read('database', ['error', 'critical']) as $l) {
+            $sql = (string) ($l['context']['sql'] ?? '');
+            echo 'BD ' . $plugin . ': ' . $l['message'] . ($sql !== '' ? ' | SQL: ' . substr($sql, 0, 160) : '') . PHP_EOL;
+        }
     }
 }
 
@@ -683,6 +854,15 @@ PHP
 #    propósito: algunos plugins ejecutan en su post-enable código que necesita el esquema
 #    ya creado (p.ej. BusImportacion guarda EmailNotification); no se activan en la 1ª
 #    ronda (la tabla aún no existe), el warm-up las crea y la 2ª ronda los activa.
+if [ "$MOTOR" = postgresql ]; then
+# CON POSTGRESQL, SÓLO EL CORE, y el esquema de los plugins se construye en cada ejecución para los de
+# su escenario (bin/pg-esquema.php, que llama el runner). Activar todos a la vez no puede funcionar
+# ahí: basta UN plugin con SQL de MySQL para que el entorno no sirva a ninguno (medido con los de
+# Mesa/FS: datetime, MODIFY, @…), y un rojo en PostgreSQL tiene que poder venir sólo del escenario.
+log_step "Construyendo el esquema del core en PostgreSQL (dos pasadas, sin y con FK)..."
+: > "$TESTENV_DIR/Test/Plugins/install-plugins.txt"
+php "$SCRIPT_DIR/pg-esquema.php" "$TESTENV_DIR"
+else
 log_step "Construyendo esquema (activar todos + warm-up, 2 rondas)..."
 echo "$ENABLE_LIST" > "$TESTENV_DIR/Test/Plugins/install-plugins.txt"
 # Estas activaciones son el tramo más largo y antes iba en silencio absoluto
@@ -709,6 +889,7 @@ warmup_schema --exigir
 log_step "Dejando todos los plugins desactivados (pizarra limpia)..."
 : > "$TESTENV_DIR/Test/Plugins/install-plugins.txt"
 ( cd "$TESTENV_DIR" && php Test/install-plugins.php >/dev/null ) || true
+fi
 
 echo
 printf '%s================================================================%s\n' "$C_OK" "$C_RESET"

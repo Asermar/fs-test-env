@@ -488,6 +488,16 @@ details.raw summary { cursor: pointer; color: var(--muted); }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* aviso del runner dentro del resumen (p. ej. «redacté la clave de la base») */
+.aviso-box {
+    flex-basis: 100%;
+    border: 1px solid rgba(241,196,15,0.5);
+    background: rgba(241,196,15,0.08);
+    color: var(--yellow);
+    border-radius: 6px;
+    padding: 0.5rem 0.8rem;
+}
+
 .error-box {
     border: 1px solid rgba(231,76,60,0.5);
     background: rgba(231,76,60,0.08);

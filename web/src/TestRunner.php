@@ -22,11 +22,23 @@ class TestRunner
     /** @var string Layout del core dentro del proyecto (Mesa_FS 'src'; FS estándar '.'). */
     private $coreDir;
 
-    public function __construct(string $baseDir)
+    /** @var string 'mysql' o 'postgresql'; '' si se pidió uno que no existe. */
+    private $motor;
+
+    /**
+     * $motor elige el entorno: 'mysql' (el de siempre) o 'postgresql', que tiene su propio directorio
+     * (TESTENV_DIR_POSTGRESQL, def. TESTENV_DIR-postgresql) y construye el esquema del escenario en
+     * cada ejecución (bin/pg-esquema.php). Los dos comparten el cerrojo: cuelgan de la misma carpeta.
+     */
+    public function __construct(string $baseDir, string $motor = 'mysql')
     {
         $this->baseDir = $baseDir;
         $this->coreDir = getenv('FS_CORE_DIR') ?: 'src';
         $this->fsDir = getenv('TESTENV_DIR') ?: $baseDir . '/test-env/facturascripts';
+        $this->motor = in_array($motor, ['mysql', 'postgresql'], true) ? $motor : '';
+        if ($this->motor === 'postgresql') {
+            $this->fsDir = getenv('TESTENV_DIR_POSTGRESQL') ?: $this->fsDir . '-postgresql';
+        }
     }
 
     /**
@@ -34,6 +46,9 @@ class TestRunner
      */
     public function run(string $plugin, string $sub, string $file = ''): array
     {
+        if ($this->motor === '') {
+            return $this->fail('Motor no válido: los que hay son mysql y postgresql.');
+        }
         if (!$this->safe($plugin) || !$this->safe($sub)) {
             return $this->fail('Parámetros no válidos.');
         }
@@ -54,7 +69,6 @@ class TestRunner
         if (!is_file($phpunit)) {
             return $this->fail('Falta PHPUnit. Provisiona el entorno (composer install).');
         }
-
         // config: preferimos la del runner web (sin stopOnFailure); si no, la estándar.
         $config = is_file($this->fsDir . '/phpunit-webrunner.xml')
             ? 'phpunit-webrunner.xml'
@@ -79,9 +93,20 @@ class TestRunner
             }
             self::copyDir($srcTest, $dest);
 
-            // 2) activar plugins requeridos (install-plugins.php activa uno por
+            // 2) PostgreSQL: el esquema del escenario desde «sólo el core» (activa sus plugins). Si
+            //    no se puede, phpunit no corre y el rojo dice que vino de AQUÍ, no de los tests.
+            if ($this->motor === 'postgresql') {
+                $esquema = $this->pgEsquema();
+                if (empty($esquema['ok'])) {
+                    return $this->failEsquema($esquema, ['plugin' => $plugin, 'sub' => $sub, 'file' => $file]);
+                }
+                $log[] = self::resumenEsquema($esquema);
+                $aislamiento = $esquema['aislamiento'] ?? null;
+            }
+
+            // 2) MySQL: activar plugins requeridos (install-plugins.php activa uno por
             //    ejecución y sale; lo llamamos en bucle hasta que no quede ninguno).
-            $maxIterations = 25;
+            $maxIterations = $this->motor === 'postgresql' ? 0 : 25;
             for ($i = 0; $i < $maxIterations; $i++) {
                 [, $out, ] = $this->exec('php Test/install-plugins.php');
                 $log[] = trim($out);
@@ -113,8 +138,11 @@ class TestRunner
             fclose($lock);
         }
 
-        return [
+        return $this->sinClave([
             'ok' => true,
+            'motor' => $this->motor,
+            'fase' => 'phpunit',
+            'aislamiento' => $aislamiento ?? null,
             'plugin' => $plugin,
             'sub' => $sub,
             'file' => $file,
@@ -125,7 +153,7 @@ class TestRunner
             'suites' => $parsed['suites'] ?? [],
             'totals' => $parsed['totals'] ?? [],
             'failed' => $parsed['failed'] ?? [],
-        ];
+        ]);
     }
 
     /**
@@ -137,6 +165,9 @@ class TestRunner
      */
     public function runCore(string $path): array
     {
+        if ($this->motor === '') {
+            return $this->fail('Motor no válido: los que hay son mysql y postgresql.');
+        }
         $path = ltrim(str_replace('\\', '/', $path), '/');
         if ($path === '' || strpos($path, '..') !== false || strpos($path, "\0") !== false
             || strpos($path, 'Test/Core') !== 0) {
@@ -151,7 +182,6 @@ class TestRunner
         if (!is_file($this->fsDir . '/vendor/bin/phpunit')) {
             return $this->fail('Falta PHPUnit. Provisiona el entorno (composer install).');
         }
-
         // config del runner web (sin stopOnFailure); si no, la estándar del core.
         $config = is_file($this->fsDir . '/phpunit-webrunner.xml') ? 'phpunit-webrunner.xml' : 'phpunit.xml';
 
@@ -160,7 +190,18 @@ class TestRunner
             return $this->fail('No se pudo adquirir el lock de ejecución.');
         }
         $junit = tempnam(sys_get_temp_dir(), 'junit_') . '.xml';
+        $installLog = '';
         try {
+            // PostgreSQL: los tests del core, sobre «sólo el core».
+            if ($this->motor === 'postgresql') {
+                @file_put_contents($this->fsDir . '/Test/Plugins/install-plugins.txt', '');
+                $esquema = $this->pgEsquema();
+                if (empty($esquema['ok'])) {
+                    return $this->failEsquema($esquema, ['core' => true, 'path' => $path]);
+                }
+                $installLog = self::resumenEsquema($esquema);
+                $aislamiento = $esquema['aislamiento'] ?? null;
+            }
             // pasar la ruta como argumento hace que PHPUnit ejecute SOLO ese fichero/carpeta,
             // ignorando la testsuite del config (que apunta a Test/Plugins).
             $cmd = 'php ' . escapeshellarg('vendor/bin/phpunit')
@@ -176,18 +217,21 @@ class TestRunner
             fclose($lock);
         }
 
-        return [
+        return $this->sinClave([
             'ok' => true,
+            'motor' => $this->motor,
+            'fase' => 'phpunit',
+            'aislamiento' => $aislamiento ?? null,
             'core' => true,
             'path' => $path,
             'config' => $config,
             'exitCode' => $exitCode ?? -1,
             'stdout' => $stdout ?? '',
-            'installLog' => '',
+            'installLog' => $installLog,
             'suites' => $parsed['suites'] ?? [],
             'totals' => $parsed['totals'] ?? [],
             'failed' => $parsed['failed'] ?? [],
-        ];
+        ]);
     }
 
     /**
@@ -240,9 +284,188 @@ class TestRunner
         return [$exit, $stdout . $stderr, $stderr];
     }
 
+    /**
+     * Si una petición de ejecución viene de OTRA web, el motivo para rechazarla; si no, ''.
+     *
+     * Ejecutar tests escribe en la base de pruebas, así que una página cualquiera abierta en el navegador
+     * no debe poder lanzarlo por POST. Se rechaza si el navegador dice que viene de otro sitio
+     * (Sec-Fetch-Site: cross-site) o si trae un Origin que no es este host. La página del runner pide
+     * desde el mismo origen, y curl o bin/run.sh no mandan ninguna de las dos cabeceras.
+     *
+     * @param array<string, mixed> $server
+     */
+    public static function rechazoCruzado(array $server): string
+    {
+        if (strtolower((string) ($server['HTTP_SEC_FETCH_SITE'] ?? '')) === 'cross-site') {
+            return 'Petición rechazada: viene de otra web (Sec-Fetch-Site: cross-site).';
+        }
+        $origen = (string) ($server['HTTP_ORIGIN'] ?? '');
+        if ($origen === '') {
+            return '';
+        }
+        $partes = parse_url($origen);
+        $hostOrigen = strtolower((string) ($partes['host'] ?? '')) . (isset($partes['port']) ? ':' . $partes['port'] : '');
+        if ($hostOrigen === '' || $hostOrigen !== strtolower((string) ($server['HTTP_HOST'] ?? ''))) {
+            return 'Petición rechazada: su Origin (' . $origen . ') no es este host.';
+        }
+        return '';
+    }
+
+    /**
+     * La contraseña de la base, fuera de la respuesta. Se mira la SALIDA y no quién la imprime: el
+     * Test/bootstrap.php del core la escribe (la provisión quita esa línea), pero también podría hacerlo un
+     * Init, un test o un include que ninguna lectura del bootstrap alcanza. Así que en los campos de TEXTO
+     * LIBRE de la respuesta (CAMPOS_LIBRES: stdout, installLog, mensajes de fallo, el esquema) su VALOR se
+     * sustituye por «***», con un aviso. Los campos que describen la ejecución (motor, fase, config, plugin,
+     * sub, path, aislamiento) no se tocan: una coincidencia ahí falsearía la respuesta sin proteger nada.
+     * El valor se lee del config.php del entorno sólo para comparar: ni se imprime ni se define como
+     * constante en este proceso.
+     *
+     * Con una clave de menos de CLAVE_MINIMA caracteres no se redacta: taparía trozos de cualquier texto.
+     * Se avisa de que no se pudo comprobar.
+     *
+     * @param array<string, mixed> $respuesta
+     * @return array<string, mixed>
+     */
+    private function sinClave(array $respuesta): array
+    {
+        $clave = $this->leeClave();
+        if ($clave === null) {
+            $respuesta['aviso'] = 'No pude leer la clave de la base del config.php del entorno: la salida no se ha redactado.';
+            return $respuesta;
+        }
+        if ($clave === '') {
+            return $respuesta;
+        }
+        if (strlen($clave) < self::CLAVE_MINIMA) {
+            $respuesta['aviso'] = 'No se pudo comprobar: clave demasiado corta para redactarla (menos de '
+                . self::CLAVE_MINIMA . ' caracteres). La salida va tal cual.';
+            return $respuesta;
+        }
+        // Y sus formas CODIFICADAS, que es como suele llegar si la imprime un json_encode, un var_export, una
+        // URL o un HTML.
+        $formas = array_values(array_unique(array_filter([
+            $clave,
+            substr((string) json_encode($clave), 1, -1),
+            substr((string) json_encode($clave, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), 1, -1),
+            addslashes($clave),
+            substr(var_export($clave, true), 1, -1),
+            rawurlencode($clave),
+            urlencode($clave),
+            htmlspecialchars($clave, ENT_QUOTES | ENT_SUBSTITUTE),
+        ], 'strlen')));
+        $vista = false;
+        $tapa = static function (&$v) use ($formas, &$vista) {
+            if (!is_string($v)) {
+                return;
+            }
+            $nueva = str_replace($formas, '***', $v);
+            if ($nueva !== $v) {
+                $v = $nueva;
+                $vista = true;
+            }
+        };
+        foreach (self::CAMPOS_LIBRES as $campo) {
+            if (!array_key_exists($campo, $respuesta)) {
+                continue;
+            }
+            if (is_array($respuesta[$campo])) {
+                array_walk_recursive($respuesta[$campo], $tapa);
+            } else {
+                $tapa($respuesta[$campo]);
+            }
+        }
+        if ($vista) {
+            $respuesta['aviso'] = 'La salida contenía la contraseña de la base y se ha sustituido por ***. '
+                . 'Algo la imprime (el bootstrap del core, un Init o un test): reprovisiona el entorno y, si sigue, búscalo.';
+        }
+        return $respuesta;
+    }
+
+    /**
+     * FS_DB_PASS del config.php del entorno, leído en un SUBPROCESO que lo carga (como cfg() en la
+     * provisión): vale cualquier forma de escribirlo (comillas dobles, DEFINE, const, concatenación…) y no
+     * define la constante en este proceso. El valor viaja por el pipe, no se imprime. '' si config.php no
+     * la menciona (no hay nada que proteger); null si la menciona y no se pudo leer.
+     */
+    private function leeClave(): ?string
+    {
+        $config = $this->fsDir . '/config.php';
+        if (strpos((string) @file_get_contents($config), 'FS_DB_PASS') === false) {
+            return '';
+        }
+        $codigo = 'require $argv[1]; echo "\n", json_encode(defined("FS_DB_PASS") ? (string) FS_DB_PASS : null);';
+        [$rc, $out, ] = $this->exec('php -r ' . escapeshellarg($codigo) . ' ' . escapeshellarg($config) . ' 2>/dev/null');
+        $lineas = explode("\n", rtrim($out, "\n"));
+        $clave = json_decode((string) end($lineas), true);
+        return $rc === 0 && is_string($clave) ? $clave : null;
+    }
+
+    private const CAMPOS_LIBRES = ['stdout', 'installLog', 'error', 'suites', 'failed', 'esquema'];
+    private const CLAVE_MINIMA = 8;
+
     private function fail(string $message): array
     {
         return ['ok' => false, 'error' => $message];
+    }
+
+    /** Lanza bin/pg-esquema.php sobre este entorno y devuelve su JSON (o un fallo con lo que dijo). */
+    private function pgEsquema(): array
+    {
+        $script = dirname(__DIR__, 2) . '/bin/pg-esquema.php';
+        [$rc, $out, $err] = $this->exec('php ' . escapeshellarg($script) . ' ' . escapeshellarg($this->fsDir) . ' --json');
+        $lineas = array_values(array_filter(array_map('trim', explode("\n", $out))));
+        $res = $lineas ? json_decode(end($lineas), true) : null;
+        if (!is_array($res)) {
+            return ['ok' => false, 'fase' => 'esquema', 'error' => 'pg-esquema.php no devolvió JSON (rc ' . $rc . '): '
+                . substr(trim($out . "\n" . $err), -500)];
+        }
+        return $res;
+    }
+
+    /**
+     * Un rojo del esquema, dicho como tal: `fase` = esquema, y cada error en `failed` (con su plugin y
+     * su tabla) y en `installLog`, que es lo que conserva quien guarda sólo el resumen.
+     */
+    private function failEsquema(array $esquema, array $extra): array
+    {
+        $failed = [];
+        foreach ($esquema['errores'] ?? [] as $e) {
+            $failed[] = [
+                'test' => 'esquema PostgreSQL · ' . ($e['plugin'] !== '' ? 'plugin ' . $e['plugin'] : $e['origen'])
+                    . ($e['tabla'] !== '' ? ' · tabla ' . $e['tabla'] : ''),
+                'status' => 'esquema',
+                'message' => $e['fase'] . ': ' . $e['motivo'],
+            ];
+        }
+        $guarda = $esquema['guarda']['error'] ?? '';
+        if ($guarda !== '') {
+            $failed[] = ['test' => 'esquema PostgreSQL · guarda de las claves ajenas', 'status' => 'esquema', 'message' => $guarda];
+        }
+        $error = $esquema['error'] ?? ($failed
+            ? 'El esquema del escenario no se pudo construir en PostgreSQL: el rojo viene de sus plugins, no de phpunit.'
+            : 'El esquema del escenario no se pudo construir en PostgreSQL.');
+        return $this->sinClave(array_merge(['ok' => false, 'motor' => 'postgresql', 'fase' => 'esquema', 'error' => $error,
+            'aislamiento' => $esquema['aislamiento'] ?? 'no se pudo comprobar'], $extra, [
+            'installLog' => self::resumenEsquema($esquema),
+            'failed' => $failed,
+            'esquema' => $esquema,
+        ]));
+    }
+
+    private static function resumenEsquema(array $e): string
+    {
+        $l = ['Esquema PostgreSQL (' . ($e['aislamiento'] ?? '?') . '): '
+            . (empty($e['plugins']) ? 'sólo el core' : implode(',', $e['plugins']))
+            . (isset($e['tablas']) ? " · {$e['tablas']} tablas, {$e['fk']} FK, {$e['segundos']} s" : '')];
+        foreach ($e['errores'] ?? [] as $x) {
+            $l[] = 'ERROR ' . $x['fase'] . ($x['plugin'] !== '' ? ' · ' . $x['plugin'] : '')
+                . ($x['tabla'] !== '' ? ' · ' . $x['tabla'] : '') . ': ' . $x['motivo'];
+        }
+        if (!empty($e['error'])) {
+            $l[] = 'ERROR ' . $e['error'];
+        }
+        return implode("\n", $l);
     }
 
     private function safe(string $segment): bool
