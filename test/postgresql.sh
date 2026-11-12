@@ -7,7 +7,7 @@
 # ## LO QUE COMPRUEBA, y por qué cada cosa
 #
 #   0. la provisión quita del bootstrap de phpunit-webrunner.xml (test-plugins.php) la línea que imprime
-#      FS_DB_PASS, y deja una que sólo la usa.
+#      FS_DB_PASS, y deja una que sólo la usa; y si la batería se corta con el volcado dentro, lo restaura.
 #   1. CONTROL POSITIVO: sólo el core construye, con 0 FK tras la pasada 1 y más de 0 tras la 2.
 #   2. LA GUARDA DEL TRUCO de las FK: si los scripts generados dejan de apagar las claves ajenas (es lo
 #      que pasaría si el core dejara de mirar `db_foreign_keys` antes que FS_DB_FOREIGN_KEYS), la pasada
@@ -64,9 +64,19 @@ echo "== 0. la provisión quita del bootstrap del runner la línea que imprime F
 # phpunit-webrunner.xml carga Test/test-plugins.php, no Test/bootstrap.php: se le añaden un volcado de la
 # clave con otra etiqueta y un uso de la constante que NO la imprime, y se reprovisiona de verdad, en el
 # contenedor. El volcado tiene que irse y el otro uso quedarse (borrarlo rompería el bootstrap).
+#
+# EL CERROJO: se toma antes de tocar test-plugins.php, para que ninguna ejecución arranque con el volcado
+# dentro. Pero la provisión lo toma ella misma con flock -n y se NIEGA si está tomado, así que se suelta
+# justo antes de lanzarla: queda la ventana que tarda podman exec en llegar a su flock. Y si en esa ventana
+# arrancara una ejecución, el runner redacta la clave de su salida igual. El respaldo se restaura desde
+# un trap, también si la batería se corta.
 TP="$D/Test/test-plugins.php"; TP_RESPALDO="$(mktemp)"
+exec 8>"$(dirname "$D")/.webrunner.lock"
+flock -w 300 8 || no_comprobado "el entorno está en uso (cerrojo ocupado más de 300 s)."
 cp "$TP" "$TP_RESPALDO"
+trap 'cp "$TP_RESPALDO" "$TP"; rm -f "$TP_RESPALDO"' EXIT
 printf '%s\n' "echo \"\\n\" . 'Clave: ' . FS_DB_PASS;" "\$usaClaveSinImprimir = strlen(FS_DB_PASS);" >> "$TP"
+flock -u 8; exec 8>&-
 podman exec -i -w "$RAIZ" -e FS_PROJECT_ROOT="$RAIZ" -e NO_COLOR=1 "$CONT" \
     "$ARNES/bin/test-env-provision.sh" --motor postgresql >/dev/null 2>&1; rc_prov=$?
 if [ "$rc_prov" = 0 ] && ! grep -q "'Clave: '" "$TP" && grep -qxF '$usaClaveSinImprimir = strlen(FS_DB_PASS);' "$TP" \
@@ -75,7 +85,28 @@ if [ "$rc_prov" = 0 ] && ! grep -q "'Clave: '" "$TP" && grep -qxF '$usaClaveSinI
 else
     mal "tras reprovisionar (rc $rc_prov), test-plugins.php no quedó como debía (volcado dentro, uso borrado o más cambios)"
 fi
-cp "$TP_RESPALDO" "$TP"; rm -f "$TP_RESPALDO"
+cp "$TP_RESPALDO" "$TP"; rm -f "$TP_RESPALDO"; trap - EXIT
+
+echo "== 0b. si la batería se corta con el volcado ya inyectado, test-plugins.php vuelve a estar como antes"
+# Una copia de esta batería (en un mktemp, con su ARNES fijado) que muere por SIGTERM justo tras inyectar.
+# Antes de ejecutarla se comprueba que el corte está: si no, sería la batería entera.
+TP_ANTES="$(mktemp)"; cp "$TP" "$TP_ANTES"; corte="$(mktemp)"
+L='printf '"'"'%s\n'"'"' "echo \"\\n\" . '"'"'Clave: '"'"' . FS_DB_PASS;" "\$usaClaveSinImprimir = strlen(FS_DB_PASS);" >> "$TP"' A="$ARNES" \
+    awk '$0 == ENVIRON["L"] { print; print "kill -TERM $$"; next }
+         /^ARNES=/ && !h { print "ARNES=\047" ENVIRON["A"] "\047"; h = 1; next } { print }' "${BASH_SOURCE[0]}" > "$corte"
+if grep -qxF 'kill -TERM $$' "$corte" && grep -qxF "ARNES='$ARNES'" "$corte"; then
+    bash "$corte" >/dev/null 2>&1; rc_corte=$?
+else
+    rc_corte=no-cortada
+fi
+rm -f "$corte"
+if [ "$rc_corte" = 143 ] && cmp -s "$TP" "$TP_ANTES"; then
+    ok "cortada tras inyectar (rc 143), el trap deja test-plugins.php como estaba"
+else
+    mal "una pasada cortada no restauró test-plugins.php o no midió (copia rc=$rc_corte)"
+    cp "$TP_ANTES" "$TP"
+fi
+rm -f "$TP_ANTES"
 
 # El mismo cerrojo que el runner y la provisión: esto reescribe el esquema del entorno.
 exec 9>"$(dirname "$D")/.webrunner.lock"
