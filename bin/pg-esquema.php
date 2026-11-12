@@ -113,9 +113,32 @@ $errores = array_merge(
     analizar($dir, $plugins, 'esquema sin FK (pasada 1)', $p1warmup['salida']),
     analizar($dir, $plugins, 'esquema con FK (pasada 2)', $p2warmup['salida'])
 );
-if ($p1install['rc'] !== 0) {
-    $errores[] = ['fase' => 'activación de plugins (pasada 1)', 'plugin' => '', 'origen' => 'Test/install-plugins.php',
-        'tabla' => '', 'tabla_de' => [], 'motivo' => 'salió con ' . $p1install['rc'] . ': ' . ultimaLinea($p1install['salida'])];
+// Un paso que no sale con 0 es un error aunque no haya escrito ninguna línea reconocible: si no, un
+// fatal que corta el warm-up antes de su resumen daba «esquema completo».
+foreach ([['activación de plugins (pasada 1)', 'Test/install-plugins.php', $p1install],
+          ['esquema sin FK (pasada 1)', 'warmup-schema.php', $p1warmup],
+          ['esquema con FK (pasada 2)', 'warmup-schema.php', $p2warmup]] as [$fase, $script, $paso]) {
+    if ($paso['rc'] !== 0) {
+        $errores[] = ['fase' => $fase, 'plugin' => '', 'origen' => $script, 'tabla' => '', 'tabla_de' => [],
+            'motivo' => 'salió con ' . $paso['rc'] . ': ' . ultimaLinea($paso['salida'])];
+    }
+}
+// Y el resumen del warm-up («OK=n FAIL=m») tiene que cuadrar con los fallos de modelo reconocidos: si
+// dice que falló algo que no supe leer, eso es un error y no un verde.
+foreach ([['esquema sin FK (pasada 1)', $p1warmup], ['esquema con FK (pasada 2)', $p2warmup]] as [$fase, $paso]) {
+    if (!preg_match('/OK=\d+ FAIL=(\d+)/', $paso['salida'], $rm)) {
+        if ($paso['rc'] === 0) {
+            $errores[] = ['fase' => $fase, 'plugin' => '', 'origen' => 'warmup-schema.php', 'tabla' => '', 'tabla_de' => [],
+                'motivo' => 'terminó sin su resumen OK=… FAIL=…: no sé si construyó el esquema.'];
+        }
+        continue;
+    }
+    $leidos = count(array_filter(analizar($dir, $plugins, $fase, $paso['salida']),
+        fn ($e) => strpos($e['origen'], '\\Model\\') !== false));
+    if ((int) $rm[1] !== $leidos) {
+        $errores[] = ['fase' => $fase, 'plugin' => '', 'origen' => 'warmup-schema.php', 'tabla' => '', 'tabla_de' => [],
+            'motivo' => "su resumen dice FAIL={$rm[1]} y reconocí $leidos fallo(s) de modelo: hay fallos que no sé atribuir."];
+    }
 }
 
 // La guarda del truco: si el core dejara de mirar `db_foreign_keys` antes que FS_DB_FOREIGN_KEYS, la
@@ -260,6 +283,7 @@ function ultimaLinea(string $s): string
 /**
  * Lee la salida de un paso y devuelve sus errores con su dueño. Reconoce:
  *   FAIL <Clase>: <mensaje>     un modelo que no pudo crear o actualizar su tabla (warm-up)
+ *   FAIL Plugins::init [P]: …   el Init de un plugin falló al arrancar (P sale de la traza)
  *   BD <Plugin>: <motivo> | SQL…   un error de base al activar ese plugin (install-plugins)
  *   …Fatal error: …             un fallo que cortó el paso
  *   MOTIVO <texto>              el error del servidor, que se pega al FAIL anterior
@@ -268,9 +292,12 @@ function analizar(string $dir, array $plugins, string $fase, string $salida): ar
 {
     $errores = [];
     foreach (explode("\n", $salida) as $linea) {
-        if (preg_match('/^FAIL ([^:]+): (.*)$/', $linea, $m)) {
+        // Hasta el PRIMER «: » (con espacio): «Plugins::init» lleva dos puntos dentro, y una clase de
+        // modelo no lleva «: ». Un «[Plugin]» detrás del origen es el que sacó el warm-up de la traza.
+        if (preg_match('/^FAIL (.+?)(?: \[([^\]]+)\])?: (.*)$/', $linea, $m)) {
+            $m = [$m[0], $m[1], $m[3], $m[2]];
             $tabla = preg_match('/Error (?:creating|updating) table (\w+)/', $m[2], $t) ? $t[1] : '';
-            $errores[] = ['fase' => $fase, 'plugin' => duenoModelo($dir, $plugins, $m[1]), 'origen' => $m[1],
+            $errores[] = ['fase' => $fase, 'plugin' => $m[3] !== '' ? $m[3] : duenoModelo($dir, $plugins, $m[1]), 'origen' => $m[1],
                 'tabla' => $tabla, 'tabla_de' => $tabla !== '' ? duenosTabla($dir, $plugins, $tabla) : [],
                 'motivo' => substr(preg_replace('/: (CREATE|ALTER) TABLE .*/s', '', $m[2]), 0, 300)];
         } elseif (preg_match('/^  MOTIVO (.*)$/', $linea, $m) && $errores) {

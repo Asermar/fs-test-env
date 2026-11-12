@@ -651,7 +651,15 @@ if ($esMysql) {
         Plugins::init();
         Plugins::deploy();
     } catch (\Throwable $e) {
-        echo 'FAIL Plugins::init: ' . $e->getMessage() . "\n";
+        // La excepción no dice de qué plugin viene; su traza sí: el primer fichero bajo Plugins/<X>/.
+        $origen = '';
+        foreach (array_merge([['file' => $e->getFile()]], $e->getTrace()) as $marco) {
+            if (preg_match('#/Plugins/([^/]+)/#', (string) ($marco['file'] ?? ''), $pm)) {
+                $origen = ' [' . $pm[1] . ']';
+                break;
+            }
+        }
+        echo 'FAIL Plugins::init' . $origen . ': ' . $e->getMessage() . "\n";
         $motivos();
     }
 }
@@ -800,7 +808,16 @@ foreach ($activationOrder as $plugin) {
         $db->close();
         exit(2);
     }
-    if (!Plugins::enable($plugin)) {
+    try {
+        $activado = Plugins::enable($plugin);
+    } catch (\Throwable $e) {
+        if (!$esPgsql) {
+            throw $e;
+        }
+        echo 'BD ' . $plugin . ': excepción al activarlo: ' . $e->getMessage() . PHP_EOL;
+        continue;
+    }
+    if (!$activado) {
         echo '-> No se pudo activar ' . $plugin . ': revisa sus dependencias en install-plugins.txt.' . PHP_EOL;
         $db->close();
         exit(3);

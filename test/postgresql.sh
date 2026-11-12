@@ -15,6 +15,9 @@
 #      plugin, su tabla y el motivo del servidor.
 #   5. PUNTO DE PARTIDA LIMPIO: tras un escenario roto, «sólo el core» vuelve a dar exactamente las
 #      mismas tablas y FK, y ningún plugin activo.
+#   7. UN INIT QUE FALLA SE ATRIBUYE A SU PLUGIN: un plugin de prueba (PruebaInitFalla, creado aquí y
+#      borrado al terminar) cuyo Init lanza en PostgreSQL da ok:false con su nombre, no «esquema completo»;
+#      y si en vez de lanzar sale con un código distinto de 0, también.
 #   6. EL NEGATIVO DEL AISLAMIENTO en sus tres estados: aislado, no se pudo comprobar (centinela que no
 #      existe) y no aislado (CONNECT concedido a propósito, y retirado al terminar).
 #
@@ -61,7 +64,9 @@ flock -w 300 9 || no_comprobado "el entorno está en uso (cerrojo ocupado más d
 LISTA="$D/Test/Plugins/install-plugins.txt"
 RESPALDO="$(mktemp -d)"
 cp "$D/warmup-schema.php" "$D/Test/install-plugins.php" "$RESPALDO/"
+PRUEBA="$D/Plugins/PruebaInitFalla"
 recoger() {
+    rm -rf -- "$PRUEBA"
     cp "$RESPALDO/warmup-schema.php" "$D/warmup-schema.php"
     cp "$RESPALDO/install-plugins.php" "$D/Test/install-plugins.php"
     rm -rf -- "$RESPALDO"
@@ -157,6 +162,55 @@ else
     mal "con CONNECT a la centinela debía decir «no aislado»: $J"
 fi
 podman exec fstest-pg psql -U postgres -qc "REVOKE CONNECT ON DATABASE fstest_centinela FROM \"$ROL\"" >/dev/null
+
+echo "== 7. un Init que falla en PostgreSQL se atribuye a su plugin"
+mkdir -p "$PRUEBA"
+cat > "$PRUEBA/facturascripts.ini" <<'INI'
+name = 'PruebaInitFalla'
+description = 'Plugin de prueba de test/postgresql.sh: su Init falla en PostgreSQL. Se borra al terminar.'
+version = 1
+min_version = 2025
+INI
+cat > "$PRUEBA/Init.php" <<'PHP'
+<?php
+namespace FacturaScripts\Plugins\PruebaInitFalla;
+
+class Init extends \FacturaScripts\Core\Template\InitClass
+{
+    public function init(): void
+    {
+        if (strtolower((string) FS_DB_TYPE) !== 'postgresql') {
+            return;
+        }
+        if (getenv('PRUEBA_INIT_MODO') === 'sale') {
+            exit(7);
+        }
+        throw new \RuntimeException('fallo de prueba del Init en PostgreSQL');
+    }
+
+    public function update(): void
+    {
+    }
+
+    public function uninstall(): void
+    {
+    }
+}
+PHP
+corre PruebaInitFalla
+lanza="$(printf '%s' "$J" | php -r '$d = json_decode(stream_get_contents(STDIN), true); $n = 0; foreach ($d["errores"] ?? [] as $e) { if ($e["plugin"] === "PruebaInitFalla" && strpos($e["motivo"], "fallo de prueba del Init") !== false) { $n++; } } echo $n;')"
+if [ "$(campo ok)" = false ] && [ "${lanza:-0}" -gt 0 ]; then
+    ok "el Init que lanza: ok:false, atribuido a PruebaInitFalla con su motivo"
+else
+    mal "el Init que lanza no se atribuye (o sale «esquema completo»): $J"
+fi
+corre PruebaInitFalla PRUEBA_INIT_MODO=sale
+if [ "$(campo ok)" = false ] && printf '%s' "$(campo errores)" | grep -q "salió con 7"; then
+    ok "el warm-up que sale con 7: ok:false, «salió con 7»"
+else
+    mal "un warm-up que sale con 7 no se cuenta como error: $J"
+fi
+rm -rf -- "$PRUEBA"
 
 echo
 if [ "$FALLOS" -gt 0 ]; then
