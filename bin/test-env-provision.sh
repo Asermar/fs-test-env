@@ -542,8 +542,10 @@ BOOTSTRAP="$TESTENV_DIR/Test/bootstrap.php"
 # Se quita de CADA bootstrap que nombre una configuración de PHPUnit del entorno (phpunit.xml carga
 # Test/bootstrap.php; phpunit-plugins.xml y phpunit-webrunner.xml, Test/test-plugins.php), y SÓLO LA LÍNEA
 # QUE LA IMPRIME (echo o print con FS_DB_PASS): si un core futuro usara la constante en otra línea,
-# borrarla rompería el bootstrap. Es la primera defensa; la segunda es el runner, que redacta la clave
-# de cualquier salida que la lleve, la imprima quien la imprima.
+# borrarla rompería el bootstrap. SÓLO CUBRE ESA FORMA, la del core: un printf, un include o una
+# concatenación en otra línea pasan, y no se amplía a propósito (cada forma nueva es un borde más). La red
+# es el runner, que redacta la clave de toda salida que devuelve, la imprima quien la imprima. Y esa red
+# NO protege un phpunit lanzado a mano en el entorno: ahí lo que imprima el bootstrap sale tal cual.
 while IFS= read -r bs; do
     f="$TESTENV_DIR/$bs"
     if [ -f "$f" ] && grep -qE '^[[:space:]]*(echo|print)\b.*FS_DB_PASS' "$f"; then
