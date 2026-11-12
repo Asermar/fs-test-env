@@ -408,6 +408,11 @@ de test, no de la copia**: la copia sigue con su MariaDB, y el arnés tiene un s
 
 ## Las baterías del arnés
 
+**`test/run-host.sh`** — comprueba que `bin/run.sh` lee del `.fs-test-env.env` sólo las claves que
+necesita, sin cargarlo entero, de modo que un `PLUGIN=` o un `MOTOR=` dentro de él no pisan los
+argumentos. Contra el `run.sh` real, con un proyecto de pega y un runner de pega (`php -S` en
+127.0.0.1). **Autocontenida, 3 comprobaciones, menos de 1 s.**
+
 **`test/postgresql.sh`** — comprueba `bin/pg-esquema.php` contra el PostgreSQL de test y un entorno de
 PostgreSQL provisionado (`FS_TEST_PG_ENV=<TESTENV_DIR_POSTGRESQL>`), ejecutándolo dentro del contenedor
 de test de la copia, que es donde lo ejecuta el runner (el PHP del host no tiene `soap`, que Verifactu

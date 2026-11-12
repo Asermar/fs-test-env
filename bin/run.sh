@@ -54,8 +54,12 @@ if [ ! -f "$ENV_FILE" ]; then
     echo "ERROR: '$FS_PROJECT_ROOT' no tiene entorno de test (.fs-test-env.env). Lánzalo desde la copia." >&2
     exit 1
 fi
-# shellcheck disable=SC1090
-. "$ENV_FILE"
+# SE LEEN SÓLO LAS CLAVES QUE HACEN FALTA, con sed, y no se hace `source`: el fichero es del proyecto,
+# y cargarlo entero ejecutaría lo que lleve dentro y podría pisar MOTOR, PLUGIN, SUB o FILE, que ya
+# vienen de los argumentos. Mismo criterio que _fs_env_lee en okoworktree.
+lee() { sed -n "s/^$1=//p" "$ENV_FILE" | tail -1 | sed 's/^"\(.*\)"$/\1/'; }
+TESTENV_CONTAINER="$(lee TESTENV_CONTAINER)"; TESTENV_HOST="$(lee TESTENV_HOST)"; FS_TEST_DIR="$(lee FS_TEST_DIR)"
+TESTENV_DIR="$(lee TESTENV_DIR)"; TESTENV_DIR_POSTGRESQL="$(lee TESTENV_DIR_POSTGRESQL)"
 for v in TESTENV_CONTAINER TESTENV_HOST FS_TEST_DIR; do
     [ -n "${!v:-}" ] || { echo "ERROR: $ENV_FILE no define $v." >&2; exit 1; }
 done
