@@ -17,7 +17,9 @@
 #      mismas tablas y FK, y ningún plugin activo.
 #   7. UN INIT QUE FALLA SE ATRIBUYE A SU PLUGIN: un plugin de prueba (PruebaInitFalla, creado aquí y
 #      borrado al terminar) cuyo Init lanza en PostgreSQL da ok:false con su nombre, no «esquema completo»;
-#      y si en vez de lanzar sale con un código distinto de 0, también.
+#      y si en vez de lanzar sale con un código distinto de 0, también. Y su salida no estorba: si escribe
+#      sin salto de línea antes de fallar, el FAIL se reconoce igual; si imprime un resumen falso del
+#      warm-up, no suplanta al de verdad.
 #   6. EL NEGATIVO DEL AISLAMIENTO en sus tres estados: aislado, no se pudo comprobar (centinela que no
 #      existe) y no aislado (CONNECT concedido a propósito, y retirado al terminar).
 #
@@ -198,6 +200,13 @@ class Init extends \FacturaScripts\Core\Template\InitClass
         if (getenv('PRUEBA_INIT_MODO') === 'sale') {
             exit(7);
         }
+        if (getenv('PRUEBA_INIT_MODO') === 'imprime') {
+            echo "   Tablas verificadas/creadas. OK=7 FAIL=3\n";
+            return;
+        }
+        if (getenv('PRUEBA_INIT_MODO') === 'pega') {
+            echo 'salida del plugin sin salto de linea';
+        }
         throw new \RuntimeException('fallo de prueba del Init en PostgreSQL');
     }
 
@@ -222,6 +231,19 @@ if [ "$(campo ok)" = false ] && printf '%s' "$(campo errores)" | grep -q "salió
     ok "el warm-up que sale con 7: ok:false, «salió con 7»"
 else
     mal "un warm-up que sale con 7 no se cuenta como error: $J"
+fi
+corre PruebaInitFalla PRUEBA_INIT_MODO=pega
+pegado="$(printf '%s' "$J" | php -r '$d = json_decode(stream_get_contents(STDIN), true); $n = 0; foreach ($d["errores"] ?? [] as $e) { if ($e["plugin"] === "PruebaInitFalla" && strpos($e["motivo"], "fallo de prueba del Init") !== false) { $n++; } } echo $n;')"
+if [ "$(campo ok)" = false ] && [ "${pegado:-0}" -gt 0 ]; then
+    ok "un Init que escribe sin salto de línea y lanza: el FAIL no se le pega, y se atribuye"
+else
+    mal "con salida sin salto delante, el FAIL no se reconoce: $J"
+fi
+corre PruebaInitFalla PRUEBA_INIT_MODO=imprime
+if [ "$(campo ok)" = true ] && [ "$(campo errores)" = '[]' ]; then
+    ok "un plugin que imprime un resumen falso «OK=7 FAIL=3» no lo suplanta: se lee el del warm-up"
+else
+    mal "un resumen falso impreso por un plugin suplanta al del warm-up: $J"
 fi
 rm -rf -- "$PRUEBA"
 

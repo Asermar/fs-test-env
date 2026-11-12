@@ -136,7 +136,11 @@ foreach ([['activación de plugins (pasada 1)', 'Test/install-plugins.php', $p1i
 // Y el resumen del warm-up («OK=n FAIL=m») tiene que cuadrar con los fallos de modelo reconocidos: si
 // dice que falló algo que no supe leer, eso es un error y no un verde.
 foreach ([['esquema sin FK (pasada 1)', $p1warmup], ['esquema con FK (pasada 2)', $p2warmup]] as [$fase, $paso]) {
-    if (!preg_match('/OK=\d+ FAIL=(\d+)/', $paso['salida'], $rm)) {
+    // La línea PROPIA del warm-up, anclada y la ÚLTIMA: un plugin que escriba «OK=7 FAIL=0» antes no
+    // puede suplantar el resumen, que es justo la red para los fallos que no sé reconocer.
+    $rm = preg_match_all('/^   Tablas verificadas\/creadas\. OK=\d+ FAIL=(\d+)$/m', $paso['salida'], $todas)
+        ? [1 => end($todas[1])] : null;
+    if ($rm === null) {
         if ($paso['rc'] === 0) {
             $errores[] = ['fase' => $fase, 'plugin' => '', 'origen' => 'warmup-schema.php', 'tabla' => '', 'tabla_de' => [],
                 'motivo' => 'terminó sin su resumen OK=… FAIL=…: no sé si construyó el esquema.'];

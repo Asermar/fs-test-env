@@ -659,7 +659,8 @@ if ($esMysql) {
                 break;
             }
         }
-        echo 'FAIL Plugins::init' . $origen . ': ' . $e->getMessage() . "\n";
+        // El salto DELANTE: si el plugin escribió algo sin terminar en salto, el FAIL no se le pega.
+        echo "\n" . 'FAIL Plugins::init' . $origen . ': ' . $e->getMessage() . "\n";
         $motivos();
     }
 }
@@ -680,7 +681,7 @@ foreach (glob(FS_FOLDER . '/Dinamic/Model/*.php') as $file) {
         $ok++;
     } catch (\Throwable $e) {
         $fail++;
-        echo 'FAIL ' . $class . ': ' . $e->getMessage() . "\n";
+        echo "\n" . 'FAIL ' . $class . ': ' . $e->getMessage() . "\n";
         $motivos();
     }
 }
@@ -688,7 +689,7 @@ foreach (glob(FS_FOLDER . '/Dinamic/Model/*.php') as $file) {
 if ($esMysql) {
     $db->exec('SET FOREIGN_KEY_CHECKS=1');
 }
-echo "   Tablas verificadas/creadas. OK=$ok FAIL=$fail\n";
+echo "\n   Tablas verificadas/creadas. OK=$ok FAIL=$fail\n";
 PHP
 
 # --- 9b) generar Test/install-plugins.php (versión "sincronizar al conjunto exacto") ---
