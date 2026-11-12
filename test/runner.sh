@@ -170,6 +170,17 @@ sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
 grep -qF 'clave demasiado corta para redactarla' <<<"$sal" && grep -qF "Clave: $CLAVE" <<<"$sal" \
     && ok "clave de menos de 8: no se redacta y avisa de que no se pudo comprobar" \
     || mal "con una clave corta debía avisar sin redactar: $sal"
+# La clave se lee cargando el config.php en un subproceso: vale cualquier forma de escribirla.
+CLAVE="ClaveDePrueba$$"
+printf '%s\n' '<?php' "DEFINE(\"FS_DB_PASS\", \"Clave\" . \"DePrueba$$\");" > "$P/test-env/facturascripts/config.php"; vuelca
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
+redactada && ok "config.php con DEFINE, comillas dobles y concatenación: se lee y se redacta" \
+    || mal "con otra forma de definir la clave no la redactó: $sal"
+# Y si lo menciona pero no se puede cargar, se dice: la salida va sin redactar.
+printf '%s\n' '<?php' "throw new Exception('roto');" "define('FS_DB_PASS', '$CLAVE');" > "$P/test-env/facturascripts/config.php"
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
+grep -qF 'No pude leer la clave' <<<"$sal" && ok "config.php que no carga: avisa de que la salida no se ha redactado" \
+    || mal "con un config.php que no carga debía avisar: $sal"
 
 # --- una ejecución pedida desde OTRA web se rechaza ---------------------------------------------
 # Ejecutar escribe en la base de pruebas: una página cualquiera abierta en el navegador no debe poder

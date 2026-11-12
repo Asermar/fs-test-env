@@ -329,11 +329,11 @@ class TestRunner
      */
     private function sinClave(array $respuesta): array
     {
-        $config = (string) @file_get_contents($this->fsDir . '/config.php');
-        if (!preg_match("/define\\(\\s*'FS_DB_PASS'\\s*,\\s*'((?:[^'\\\\]|\\\\.)*)'\\s*\\)/", $config, $m)) {
+        $clave = $this->leeClave();
+        if ($clave === null) {
+            $respuesta['aviso'] = 'No pude leer la clave de la base del config.php del entorno: la salida no se ha redactado.';
             return $respuesta;
         }
-        $clave = str_replace(["\\'", '\\\\'], ["'", '\\'], $m[1]);
         if ($clave === '') {
             return $respuesta;
         }
@@ -364,6 +364,25 @@ class TestRunner
                 . 'Algo la imprime (el bootstrap del core, un Init o un test): reprovisiona el entorno y, si sigue, búscalo.';
         }
         return $respuesta;
+    }
+
+    /**
+     * FS_DB_PASS del config.php del entorno, leído en un SUBPROCESO que lo carga (como cfg() en la
+     * provisión): vale cualquier forma de escribirlo (comillas dobles, DEFINE, const, concatenación…) y no
+     * define la constante en este proceso. El valor viaja por el pipe, no se imprime. '' si config.php no
+     * la menciona (no hay nada que proteger); null si la menciona y no se pudo leer.
+     */
+    private function leeClave(): ?string
+    {
+        $config = $this->fsDir . '/config.php';
+        if (strpos((string) @file_get_contents($config), 'FS_DB_PASS') === false) {
+            return '';
+        }
+        $codigo = 'require $argv[1]; echo "\n", json_encode(defined("FS_DB_PASS") ? (string) FS_DB_PASS : null);';
+        [$rc, $out, ] = $this->exec('php -r ' . escapeshellarg($codigo) . ' ' . escapeshellarg($config) . ' 2>/dev/null');
+        $lineas = explode("\n", rtrim($out, "\n"));
+        $clave = json_decode((string) end($lineas), true);
+        return $rc === 0 && is_string($clave) ? $clave : null;
     }
 
     private const CAMPOS_LIBRES = ['stdout', 'installLog', 'error', 'suites', 'failed', 'esquema'];
