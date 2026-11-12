@@ -1,7 +1,7 @@
 # fs-test-env
 
 <p align="center">
-  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.5.2-2E7D6E?style=for-the-badge"></a>
+  <a href="#changelog"><img alt="Versión" src="https://img.shields.io/badge/Versi%C3%B3n-3.6.0-2E7D6E?style=for-the-badge"></a>
   <img alt="FacturaScripts" src="https://img.shields.io/badge/FacturaScripts-2026%2B-0C7C59?style=for-the-badge">
   <img alt="PHPUnit" src="https://img.shields.io/badge/PHPUnit-9.6-6E9B34?style=for-the-badge">
 </p>
@@ -626,6 +626,41 @@ class CsvImportPresentTest extends TestCase
 
 Cambios destacados por versión (la versión es la de `VERSION`, único punto de verdad). Este
 changelog nace en la 2.2.1: lo anterior está en el historial de git, sin bloques por versión.
+
+### 3.6.0 — La suite de un plugin se puede correr también en PostgreSQL
+
+> **Al actualizar**: MariaDB **no cambia** —sin `--motor` todo sigue igual—. Lo nuevo es opcional y
+> necesita un paso: `bin/pg-up.sh` levanta o crea el servidor de test, y **no arranca solo al
+> reiniciar la máquina** (lo llama `run.sh`). La contraseña del superusuario vive en
+> `~/.config/tooling/fs-test_pg.env`, en 0600, y la genera `pg-up.sh` si no existe.
+
+- **3.6.0** — **Un PostgreSQL 13 compartido para el arnés de test**: el contenedor `fstest-pg`,
+  publicado **sólo** en `127.0.0.1:5432` y en la red `asermar.com`, con `bin/pg-up.sh` (lo levanta, o
+  lo crea con una contraseña al azar que escribe en `~/.config/tooling/fs-test_pg.env` en 0600, y la
+  publica **entera o no la publica**) y `bin/pg-check.sh`, que comprueba que responde **y que
+  autentica**, que no es lo mismo.
+- **3.6.0** — **La suite de un plugin corre en PostgreSQL**: `--motor postgresql` en la provisión y
+  en el teardown, `motor=postgresql` en la API del runner, y un `bin/run.sh` nuevo para lanzar un
+  escenario desde el host:
+  `~/Dev/Tooling/fs-test/bin/run.sh --motor postgresql --plugin <P> --sub main`.
+- **3.6.0** — **En PostgreSQL cada ejecución parte de una base con sólo el core** y construye el
+  esquema del escenario —el plugin y sus dependencias— **en dos pasadas, primero sin claves ajenas y
+  luego con ellas**, como hace el CI de FacturaScripts. Son unos 4-5 s. **Medido, y es el porqué**:
+  PostgreSQL no crea una clave ajena hacia una tabla que todavía no existe, y con todos los plugins
+  activos a la vez **uno incompatible tumbaba el entorno para todos**. Un rojo dice ahora **de dónde
+  vino**: del esquema —con su plugin, su tabla y el motivo que dio el servidor— o de phpunit.
+- **3.6.0** — **El runner rechaza una ejecución pedida desde otra web** (`Sec-Fetch-Site` y
+  `Origin`), y **redacta la contraseña de la base de test** si asomara por la salida —también
+  codificada—, con un aviso que se ve tanto en `run.sh` como en la web.
+
+**Comprobado antes de etiquetar, por quien publica**: el encargante relevó expresamente de repetir
+las pruebas (criterio de Alexis del 12-nov-2026), así que **esta versión se publica con las suyas**
+—provision 64, registro 41, runner 41, teardown 15, postgresql 16, run-host 4, todas en verde, y una
+ejecución real en copia: MariaDB 84/1 y PostgreSQL 81/1/3—. Lo que sí se midió aquí, en un clon
+desechable de la punta: `bash -n` de los ocho guiones tocados y `php -l` de los tres ficheros PHP,
+todos limpios; que **no se publica ningún secreto** —los únicos `.env` versionados son los
+`.example`, el real vive fuera del repo y el compose lo exige con `:?`—; y que el servidor se declara
+**sólo** en `127.0.0.1` y con traefik desactivado.
 
 ### 3.5.2 — La salida que ofrece el rechazo vuelve a funcionar al copiarla
 
