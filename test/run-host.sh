@@ -32,7 +32,7 @@ ENV
 cat > "$BASE/router.php" <<'PHP'
 <?php
 header('Content-Type: application/json');
-echo json_encode(['ok' => true, 'exitCode' => 0, 'motor' => $_POST['motor'] ?? '', 'error' => 'plugin=' . ($_POST['plugin'] ?? '')]);
+echo json_encode(['ok' => true, 'exitCode' => 0, 'motor' => $_POST['motor'] ?? '', 'error' => 'plugin=' . ($_POST['plugin'] ?? ''), 'aviso' => 'AVISO-DE-PEGA']);
 PHP
 PUERTO=$((20000 + $$ % 20000))
 php -S "127.0.0.1:$PUERTO" "$BASE/router.php" >/dev/null 2>&1 & PID=$!
@@ -45,6 +45,7 @@ json="$(printf '%s\n' "$sal" | grep '^{' | tail -1)"
 [ "$(printf '%s' "$json" | jq -r '.error')" = "plugin=Real" ] && ok "el plugin es el del argumento, no el del fichero" || mal "el plugin no es el del argumento: $sal"
 [ "$(printf '%s' "$json" | jq -r '.motor')" = "mysql" ] && ok "el motor es el de por defecto, no el del fichero" || mal "el motor no es el de los argumentos: $sal"
 [ "$rc" = 0 ] && ok "y run.sh sale con 0 (el runner de pega dice verde)" || mal "run.sh salió con $rc: $sal"
+[ "$(printf '%s' "$json" | jq -r '.aviso')" = "AVISO-DE-PEGA" ] && ok "el resumen de run.sh enseña el aviso del runner" || mal "run.sh no enseña el aviso: $sal"
 
 printf '\n'
 [ "$FALLOS" -eq 0 ] && { printf '\033[1;32m%s comprobaciones, todas en verde.\033[0m\n' "$OK"; exit 0; }

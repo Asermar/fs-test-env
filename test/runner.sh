@@ -198,6 +198,40 @@ esperada="$(printf '%s\n' 'raw:***' 'json:***' 'json2:***' 'slashes:***' "export
 [ "$salida" = "$esperada" ] && ok "la clave codificada (JSON, escapada, var_export, URL, HTML) también sale como ***" \
     || mal "alguna forma codificada de la clave salió en la respuesta: $salida"
 
+# --- la web enseña el aviso del runner ---------------------------------------------------------
+# Contra el app.js REAL, cargado en node con un document de pega: resultSummary pinta el aviso (y sólo si
+# lo hay), y runTests/runCoreTests lo añaden al error cuando la respuesta es ok:false. Sin node, se dice.
+printf '\n\033[1;36m— la web enseña el aviso del runner —\033[0m\n'
+if command -v node >/dev/null; then
+    cat > "$BASE/prueba-app.js" <<'JS'
+const fs = require('fs'), vm = require('vm');
+const stub = new Proxy(function () {}, { get: (t, k) => (k === Symbol.toPrimitive ? () => '' : stub), apply: () => stub, construct: () => stub, set: () => true });
+const nodo = (tag) => ({ tag, className: '', textContent: '', children: [], appendChild(c) { this.children.push(c); return c; }, setAttribute() {}, addEventListener() {}, classList: stub });
+const document = new Proxy({ createElement: nodo, createTextNode: (t) => ({ textContent: t, children: [] }) }, { get: (o, k) => (k in o ? o[k] : stub) });
+const ctx = vm.createContext({ document, window: stub, localStorage: stub, fetch: stub, console, setTimeout: stub, URLSearchParams: stub, location: stub, history: stub, navigator: stub });
+vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), ctx);
+const texto = (n) => (n.textContent || '') + ' ' + (n.children || []).map(texto).join(' ');
+const con = ctx.resultSummary({ totals: {}, aviso: 'AVISO-DE-PRUEBA' }), sin = ctx.resultSummary({ totals: {} });
+const avisoCon = con.children.find((c) => c.className === 'aviso-box'), avisoSin = sin.children.find((c) => c.className === 'aviso-box');
+console.log(avisoCon && texto(avisoCon).includes('AVISO-DE-PRUEBA') ? 'con-aviso' : 'falta-aviso', avisoSin ? 'aviso-de-sobra' : 'sin-aviso');
+ctx.fetch = async () => ({ json: async () => ({ ok: false, error: 'ERROR-DE-PRUEBA', aviso: 'AVISO-DE-PRUEBA' }) });
+ctx.URLSearchParams = function () {};
+(async () => {
+    for (const f of ['runTests', 'runCoreTests']) {
+        const slot = { body: nodo('div'), badge: nodo('span'), card: nodo('div'), header: nodo('div'), details: nodo('details'), title: nodo('span') };
+        await (f === 'runTests' ? ctx.runTests('P', 'main', '', null, slot) : ctx.runCoreTests('Test/Core/X.php', null, slot));
+        console.log(f, texto(slot.body).includes('AVISO-DE-PRUEBA') ? 'error-con-aviso' : 'error-sin-aviso: ' + texto(slot.body));
+    }
+})();
+JS
+    sal="$(node "$BASE/prueba-app.js" "$T/web/public/assets/app.js" 2>&1)"
+    grep -qx 'con-aviso sin-aviso' <<<"$sal" && ok "el resumen pinta el aviso cuando lo hay, y no cuando no" || mal "el resumen no pinta bien el aviso: $sal"
+    grep -qx 'runTests error-con-aviso' <<<"$sal" && grep -qx 'runCoreTests error-con-aviso' <<<"$sal" \
+        && ok "con ok:false, el error de runTests y runCoreTests lleva el aviso" || mal "el error no lleva el aviso: $sal"
+else
+    printf '  \033[1;33m?\033[0m %s\n' "NO COMPROBADO: falta node; el aviso de la web no se ha probado."
+fi
+
 # --- una ejecución pedida desde OTRA web se rechaza ---------------------------------------------
 # Ejecutar escribe en la base de pruebas: una página cualquiera abierta en el navegador no debe poder
 # lanzarlo por POST. Contra el `TestRunner::rechazoCruzado()` REAL, con las cabeceras que manda cada

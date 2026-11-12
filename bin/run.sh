@@ -96,7 +96,7 @@ if ! respuesta="$(curl -sS --fail-with-body -X POST "$url" "${args[@]}")"; then
     exit 1
 fi
 if command -v jq >/dev/null 2>&1; then
-    printf '%s' "$respuesta" | jq -c '{ok, motor, fase, aislamiento, exitCode, totals, failed, error}'
+    printf '%s' "$respuesta" | jq -c '{ok, motor, fase, aislamiento, exitCode, totals, failed, error, aviso}'
     ok="$(printf '%s' "$respuesta" | jq -r '.ok')"
     codigo="$(printf '%s' "$respuesta" | jq -r '.exitCode // 1')"
 else
