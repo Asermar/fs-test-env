@@ -314,10 +314,15 @@ class TestRunner
     /**
      * La contraseña de la base, fuera de la respuesta. Se mira la SALIDA y no quién la imprime: el
      * Test/bootstrap.php del core la escribe (la provisión quita esa línea), pero también podría hacerlo un
-     * Init, un test o un include que ninguna lectura del bootstrap alcanza. Así que toda cadena de la
-     * respuesta (stdout, installLog, mensajes de fallo, el esquema) que contenga su VALOR lo lleva
-     * sustituido por «***», con un aviso. El valor se lee del config.php del entorno sólo para comparar: ni
-     * se imprime ni se define como constante en este proceso.
+     * Init, un test o un include que ninguna lectura del bootstrap alcanza. Así que en los campos de TEXTO
+     * LIBRE de la respuesta (CAMPOS_LIBRES: stdout, installLog, mensajes de fallo, el esquema) su VALOR se
+     * sustituye por «***», con un aviso. Los campos que describen la ejecución (motor, fase, config, plugin,
+     * sub, path, aislamiento) no se tocan: una coincidencia ahí falsearía la respuesta sin proteger nada.
+     * El valor se lee del config.php del entorno sólo para comparar: ni se imprime ni se define como
+     * constante en este proceso.
+     *
+     * Con una clave de menos de CLAVE_MINIMA caracteres no se redacta: taparía trozos de cualquier texto.
+     * Se avisa de que no se pudo comprobar.
      *
      * @param array<string, mixed> $respuesta
      * @return array<string, mixed>
@@ -332,19 +337,37 @@ class TestRunner
         if ($clave === '') {
             return $respuesta;
         }
+        if (strlen($clave) < self::CLAVE_MINIMA) {
+            $respuesta['aviso'] = 'No se pudo comprobar: clave demasiado corta para redactarla (menos de '
+                . self::CLAVE_MINIMA . ' caracteres). La salida va tal cual.';
+            return $respuesta;
+        }
         $vista = false;
-        array_walk_recursive($respuesta, static function (&$v) use ($clave, &$vista) {
-            if (is_string($v) && strpos($v, $clave) !== false) {
-                $v = str_replace($clave, '***', $v);
+        foreach (self::CAMPOS_LIBRES as $campo) {
+            if (!array_key_exists($campo, $respuesta)) {
+                continue;
+            }
+            if (is_array($respuesta[$campo])) {
+                array_walk_recursive($respuesta[$campo], static function (&$v) use ($clave, &$vista) {
+                    if (is_string($v) && strpos($v, $clave) !== false) {
+                        $v = str_replace($clave, '***', $v);
+                        $vista = true;
+                    }
+                });
+            } elseif (is_string($respuesta[$campo]) && strpos($respuesta[$campo], $clave) !== false) {
+                $respuesta[$campo] = str_replace($clave, '***', $respuesta[$campo]);
                 $vista = true;
             }
-        });
+        }
         if ($vista) {
             $respuesta['aviso'] = 'La salida contenía la contraseña de la base y se ha sustituido por ***. '
                 . 'Algo la imprime (el bootstrap del core, un Init o un test): reprovisiona el entorno y, si sigue, búscalo.';
         }
         return $respuesta;
     }
+
+    private const CAMPOS_LIBRES = ['stdout', 'installLog', 'error', 'suites', 'failed', 'esquema'];
+    private const CLAVE_MINIMA = 8;
 
     private function fail(string $message): array
     {

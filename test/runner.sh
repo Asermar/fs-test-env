@@ -156,6 +156,20 @@ redactada && grep -qF '"fase":"esquema"' <<<"$sal" && ok "PostgreSQL: la clave e
     || mal "PostgreSQL: la respuesta del esquema llevaba la clave o no avisó: $sal"
 sal="$(php "$BASE/bootstrap.php" "$A" "$P" postgresql core 2>&1)"
 redactada && ok "PostgreSQL, runCore(): tampoco" || mal "PostgreSQL runCore() llevaba la clave: $sal"
+# Sólo los campos de texto libre: una clave que coincide con parte del nombre de la configuración no la
+# cambia (la respuesta mentiría sobre qué se ejecutó), pero sí se redacta en stdout.
+pon_clave() { printf '%s\n' '<?php' "define('FS_DB_PASS', '$1');" > "$P/test-env/facturascripts/config.php"; }
+CLAVE=unit-plugins; pon_clave "$CLAVE"; vuelca
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
+grep -qF '"config":"phpunit-plugins.xml"' <<<"$sal" && grep -qF '"stdout":"Clave: ***' <<<"$sal" \
+    && ok "la clave sólo se redacta en el texto libre: config sigue diciendo phpunit-plugins.xml" \
+    || mal "la redacción tocó un campo que no es texto libre o no redactó stdout: $sal"
+# Una clave corta no se redacta (taparía trozos de cualquier texto): se avisa de que no se pudo comprobar.
+CLAVE=corta1; pon_clave "$CLAVE"; vuelca
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
+grep -qF 'clave demasiado corta para redactarla' <<<"$sal" && grep -qF "Clave: $CLAVE" <<<"$sal" \
+    && ok "clave de menos de 8: no se redacta y avisa de que no se pudo comprobar" \
+    || mal "con una clave corta debía avisar sin redactar: $sal"
 
 # --- una ejecución pedida desde OTRA web se rechaza ---------------------------------------------
 # Ejecutar escribe en la base de pruebas: una página cualquiera abierta en el navegador no debe poder
