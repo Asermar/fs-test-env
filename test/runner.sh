@@ -116,6 +116,32 @@ for m in run runCore; do
     [ "$n" -eq 1 ] && ok "$m() devuelve failed" || mal "$m() no devuelve failed"
 done
 
+# --- una ejecución pedida desde OTRA web se rechaza ---------------------------------------------
+# Ejecutar escribe en la base de pruebas: una página cualquiera abierta en el navegador no debe poder
+# lanzarlo por POST. Contra el `TestRunner::rechazoCruzado()` REAL, con las cabeceras que manda cada
+# cliente: la página del runner (mismo origen), curl o run.sh (ninguna) y otra web.
+printf '\n\033[1;36m— peticiones de otra web —\033[0m\n'
+cat > "$BASE/origen.php" <<'PHP'
+<?php
+[, $arnes] = $argv;
+require $arnes . '/web/src/TestRunner.php';
+$h = ['HTTP_HOST' => 'runner.ejemplo'];
+foreach ([
+    'curl'      => $h,
+    'pagina'    => $h + ['HTTP_SEC_FETCH_SITE' => 'same-origin', 'HTTP_ORIGIN' => 'https://runner.ejemplo'],
+    'otra'      => $h + ['HTTP_ORIGIN' => 'https://otra.ejemplo'],
+    'cruzada'   => $h + ['HTTP_SEC_FETCH_SITE' => 'cross-site'],
+    'nulo'      => $h + ['HTTP_ORIGIN' => 'null'],
+] as $caso => $server) {
+    echo $caso, '=', TestWeb\TestRunner::rechazoCruzado($server) === '' ? 'pasa' : 'rechaza', "\n";
+}
+PHP
+org="$(php "$BASE/origen.php" "$T" 2>&1)"
+for esperado in curl=pasa pagina=pasa otra=rechaza cruzada=rechaza nulo=rechaza; do
+    grep -qxF "$esperado" <<<"$org" && ok "origen: $esperado" || mal "origen: se esperaba $esperado: $org"
+done
+grep -q 'rechazoCruzado(\$_SERVER)' "$T/web/public/index.php" && ok "index.php lo consulta antes de action=run" || mal "index.php no consulta rechazoCruzado"
+
 printf '\n'
 [ "$FALLOS" -eq 0 ] && { printf '\033[1;32m%s comprobaciones, todas en verde.\033[0m\n' "$OK"; exit 0; }
 printf '\033[1;31m%s en verde, %s FALLIDAS.\033[0m\n' "$OK" "$FALLOS"; exit 1

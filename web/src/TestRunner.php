@@ -286,6 +286,33 @@ class TestRunner
         return [$exit, $stdout . $stderr, $stderr];
     }
 
+    /**
+     * Si una petición de ejecución viene de OTRA web, el motivo para rechazarla; si no, ''.
+     *
+     * Ejecutar tests escribe en la base de pruebas, así que una página cualquiera abierta en el navegador
+     * no debe poder lanzarlo por POST. Se rechaza si el navegador dice que viene de otro sitio
+     * (Sec-Fetch-Site: cross-site) o si trae un Origin que no es este host. La página del runner pide
+     * desde el mismo origen, y curl o bin/run.sh no mandan ninguna de las dos cabeceras.
+     *
+     * @param array<string, mixed> $server
+     */
+    public static function rechazoCruzado(array $server): string
+    {
+        if (strtolower((string) ($server['HTTP_SEC_FETCH_SITE'] ?? '')) === 'cross-site') {
+            return 'Petición rechazada: viene de otra web (Sec-Fetch-Site: cross-site).';
+        }
+        $origen = (string) ($server['HTTP_ORIGIN'] ?? '');
+        if ($origen === '') {
+            return '';
+        }
+        $partes = parse_url($origen);
+        $hostOrigen = strtolower((string) ($partes['host'] ?? '')) . (isset($partes['port']) ? ':' . $partes['port'] : '');
+        if ($hostOrigen === '' || $hostOrigen !== strtolower((string) ($server['HTTP_HOST'] ?? ''))) {
+            return 'Petición rechazada: su Origin (' . $origen . ') no es este host.';
+        }
+        return '';
+    }
+
     private function fail(string $message): array
     {
         return ['ok' => false, 'error' => $message];

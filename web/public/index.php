@@ -62,6 +62,11 @@ switch ($action) {
             http_response_code(405);
             json_out(['ok' => false, 'error' => 'Método no permitido.']);
         }
+        $rechazo = TestRunner::rechazoCruzado($_SERVER);
+        if ($rechazo !== '') {
+            http_response_code(403);
+            json_out(['ok' => false, 'error' => $rechazo]);
+        }
         $runner = new TestRunner($base, (string)($_POST['motor'] ?? 'mysql'));
         if (!empty($_POST['core'])) {
             $result = $runner->runCore((string)($_POST['path'] ?? ''));
