@@ -7,7 +7,8 @@
 # ## LO QUE COMPRUEBA, y por qué cada cosa
 #
 #   0. la provisión quita del bootstrap de phpunit-webrunner.xml (test-plugins.php) la línea que imprime
-#      FS_DB_PASS, y deja una que sólo la usa; y si la batería se corta con el volcado dentro, lo restaura.
+#      FS_DB_PASS, y deja una que sólo la usa; y si la batería se corta con el volcado dentro, lo restaura
+#      (0b); y si no puede respaldarlo, no lo toca (0c).
 #   1. CONTROL POSITIVO: sólo el core construye, con 0 FK tras la pasada 1 y más de 0 tras la 2.
 #   2. LA GUARDA DEL TRUCO de las FK: si los scripts generados dejan de apagar las claves ajenas (es lo
 #      que pasaría si el core dejara de mirar `db_foreign_keys` antes que FS_DB_FOREIGN_KEYS), la pasada
@@ -73,7 +74,9 @@ echo "== 0. la provisión quita del bootstrap del runner la línea que imprime F
 TP="$D/Test/test-plugins.php"; TP_RESPALDO="$(mktemp)"
 exec 8>"$(dirname "$D")/.webrunner.lock"
 flock -w 300 8 || no_comprobado "el entorno está en uso (cerrojo ocupado más de 300 s)."
-cp "$TP" "$TP_RESPALDO"
+# El respaldo se hace ANTES de armar el trap, y si falla se para: si no, el trap restauraría un respaldo
+# vacío encima de test-plugins.php.
+cp "$TP" "$TP_RESPALDO" || no_comprobado "no pude respaldar $TP; no lo toco."
 trap 'cp "$TP_RESPALDO" "$TP"; rm -f "$TP_RESPALDO"' EXIT
 printf '%s\n' "echo \"\\n\" . 'Clave: ' . FS_DB_PASS;" "\$usaClaveSinImprimir = strlen(FS_DB_PASS);" >> "$TP"
 flock -u 8; exec 8>&-
@@ -90,11 +93,19 @@ cp "$TP_RESPALDO" "$TP"; rm -f "$TP_RESPALDO"; trap - EXIT
 echo "== 0b. si la batería se corta con el volcado ya inyectado, test-plugins.php vuelve a estar como antes"
 # Una copia de esta batería (en un mktemp, con su ARNES fijado) que muere por SIGTERM justo tras inyectar.
 # Antes de ejecutarla se comprueba que el corte está: si no, sería la batería entera.
+# cortada <destino> [<respaldo>]: esa copia; con <respaldo>, el suyo es ése en vez de un mktemp. Sale 1 si
+# no pudo hacer los cambios: entonces la copia sería la batería entera y no mediría nada.
+cortada() {
+    local tp_linea='TP="$D/Test/test-plugins.php"; TP_RESPALDO="$(mktemp)"'
+    L='printf '"'"'%s\n'"'"' "echo \"\\n\" . '"'"'Clave: '"'"' . FS_DB_PASS;" "\$usaClaveSinImprimir = strlen(FS_DB_PASS);" >> "$TP"' \
+    A="$ARNES" T="$tp_linea" R="${2:-}" awk '$0 == ENVIRON["L"] { print; print "kill -TERM $$"; next }
+        ENVIRON["R"] != "" && $0 == ENVIRON["T"] { print "TP=\"$D/Test/test-plugins.php\"; TP_RESPALDO=\047" ENVIRON["R"] "\047"; next }
+        /^ARNES=/ && !h { print "ARNES=\047" ENVIRON["A"] "\047"; h = 1; next } { print }' "${BASH_SOURCE[0]}" > "$1"
+    grep -qxF 'kill -TERM $$' "$1" && grep -qxF "ARNES='$ARNES'" "$1" \
+        && { [ -z "${2:-}" ] || grep -qxF "TP=\"\$D/Test/test-plugins.php\"; TP_RESPALDO='$2'" "$1"; }
+}
 TP_ANTES="$(mktemp)"; cp "$TP" "$TP_ANTES"; corte="$(mktemp)"
-L='printf '"'"'%s\n'"'"' "echo \"\\n\" . '"'"'Clave: '"'"' . FS_DB_PASS;" "\$usaClaveSinImprimir = strlen(FS_DB_PASS);" >> "$TP"' A="$ARNES" \
-    awk '$0 == ENVIRON["L"] { print; print "kill -TERM $$"; next }
-         /^ARNES=/ && !h { print "ARNES=\047" ENVIRON["A"] "\047"; h = 1; next } { print }' "${BASH_SOURCE[0]}" > "$corte"
-if grep -qxF 'kill -TERM $$' "$corte" && grep -qxF "ARNES='$ARNES'" "$corte"; then
+if cortada "$corte"; then
     bash "$corte" >/dev/null 2>&1; rc_corte=$?
 else
     rc_corte=no-cortada
@@ -104,6 +115,23 @@ if [ "$rc_corte" = 143 ] && cmp -s "$TP" "$TP_ANTES"; then
     ok "cortada tras inyectar (rc 143), el trap deja test-plugins.php como estaba"
 else
     mal "una pasada cortada no restauró test-plugins.php o no midió (copia rc=$rc_corte)"
+    cp "$TP_ANTES" "$TP"
+fi
+
+echo "== 0c. si el respaldo falla, se para sin tocar test-plugins.php"
+# La copia usa como respaldo un fichero vacío de sólo lectura: el cp falla. Tiene que salir con 2 (NO
+# COMPROBADO) y dejar test-plugins.php igual; si armara el trap antes, lo pisaría con el respaldo vacío.
+cp "$TP" "$TP_ANTES"; corte="$(mktemp)"; ro="$(mktemp)"; chmod 444 "$ro"
+if cortada "$corte" "$ro"; then
+    bash "$corte" >/dev/null 2>&1; rc_corte=$?
+else
+    rc_corte=no-cortada
+fi
+rm -f "$corte" "$ro"
+if [ "$rc_corte" = 2 ] && cmp -s "$TP" "$TP_ANTES"; then
+    ok "con el respaldo imposible sale con 2 y test-plugins.php sigue igual"
+else
+    mal "con el respaldo imposible no paró o tocó test-plugins.php (copia rc=$rc_corte)"
     cp "$TP_ANTES" "$TP"
 fi
 rm -f "$TP_ANTES"
