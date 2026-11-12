@@ -540,17 +540,18 @@ BOOTSTRAP="$TESTENV_DIR/Test/bootstrap.php"
 # siempre. Es idempotente: si ya no está, no hace nada.
 #
 # Se quita de CADA bootstrap que nombre una configuración de PHPUnit del entorno (phpunit.xml carga
-# Test/bootstrap.php; phpunit-plugins.xml y phpunit-webrunner.xml, Test/test-plugins.php), y por el USO de
-# FS_DB_PASS, no por la etiqueta «DB Pass»: es el mismo criterio con el que el runner se niega a ejecutar.
-# En el core la constante sólo aparece en esa línea del volcado.
+# Test/bootstrap.php; phpunit-plugins.xml y phpunit-webrunner.xml, Test/test-plugins.php), y SÓLO LA LÍNEA
+# QUE LA IMPRIME (echo o print con FS_DB_PASS): si un core futuro usara la constante en otra línea,
+# borrarla rompería el bootstrap. Es la primera defensa; la segunda es el runner, que redacta la clave
+# de cualquier salida que la lleve, la imprima quien la imprima.
 while IFS= read -r bs; do
     f="$TESTENV_DIR/$bs"
-    if [ -f "$f" ] && grep -q "FS_DB_PASS" "$f"; then
+    if [ -f "$f" ] && grep -qE '^[[:space:]]*(echo|print)\b.*FS_DB_PASS' "$f"; then
         log_step "Quitando de $bs el volcado de la contraseña (viene del core)..."
         tmp_bs="$(mktemp)"
-        grep -v "FS_DB_PASS" "$f" > "$tmp_bs" && cat "$tmp_bs" > "$f"
+        grep -vE '^[[:space:]]*(echo|print)\b.*FS_DB_PASS' "$f" > "$tmp_bs" && cat "$tmp_bs" > "$f"
         rm -f "$tmp_bs"
-        if grep -q "FS_DB_PASS" "$f"; then
+        if grep -qE '^[[:space:]]*(echo|print)\b.*FS_DB_PASS' "$f"; then
             echo "ERROR: no se pudo quitar la contraseña de $bs; los tests la imprimirán." >&2
             exit 1
         fi

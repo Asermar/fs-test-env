@@ -116,42 +116,46 @@ for m in run runCore; do
     [ "$n" -eq 1 ] && ok "$m() devuelve failed" || mal "$m() no devuelve failed"
 done
 
-# --- un bootstrap que vuelca la contraseña no se ejecuta --------------------------------------
-# El Test/bootstrap.php del core escribe FS_DB_PASS en la salida y la provisión lo quita; si alguien lo
-# pisa, el runner se niega, en los dos motores. Se mira el bootstrap que carga la configuración que se va
-# a usar (phpunit-webrunner.xml carga Test/test-plugins.php), no un fichero fijo. Contra TestRunner REAL,
-# con un entorno de pega que tiene todo lo que run() y runCore() comprueban antes.
-printf '\n\033[1;36m— bootstrap que vuelca la contraseña —\033[0m\n'
-P="$BASE/proyecto"; E="$P/test-env/facturascripts"
-mkdir -p "$P/src/Plugins/Pega/Test/main" "$E/Core" "$E/vendor/bin" "$E/Test/Core"
-: > "$E/Core/Kernel.php"; : > "$E/config.php"; printf '<?php\n' > "$E/vendor/bin/phpunit"; : > "$E/Test/Core/PegaTest.php"
+# --- la contraseña de la base no sale en la respuesta ----------------------------------------
+# Se mira la SALIDA, no quién la imprime: un phpunit de pega que la escribe (como haría el bootstrap del
+# core, un Init o un test) y la respuesta no tiene que llevarla, sino «***» y un aviso. Contra TestRunner
+# REAL. Para PostgreSQL, una copia del arnés con un pg-esquema.php de pega cuyo JSON la lleva.
+printf '\n\033[1;36m— la contraseña de la base no sale en la respuesta —\033[0m\n'
+CLAVE="ClaveDePrueba$$"
+P="$BASE/proyecto"
+for E in "$P/test-env/facturascripts" "$P/test-env/facturascripts-postgresql"; do
+    mkdir -p "$E/Core" "$E/vendor/bin" "$E/Test/Core" "$E/Test/Plugins"
+    : > "$E/Core/Kernel.php"; : > "$E/Test/Core/PegaTest.php"; printf '<?php\n' > "$E/vendor/bin/phpunit"
+    printf '%s\n' '<?php' "define('FS_DB_PASS', '$CLAVE');" > "$E/config.php"
+done
+mkdir -p "$P/src/Plugins/Pega/Test/main"
+A="$BASE/arnes"; mkdir -p "$A/web/src" "$A/bin"; cp "$T"/web/src/*.php "$A/web/src/"
+printf '%s\n' '<?php' "echo json_encode(['ok' => false, 'error' => 'el Init de Pega dijo $CLAVE', 'errores' => []]), \"\\n\";" > "$A/bin/pg-esquema.php"
 cat > "$BASE/bootstrap.php" <<'PHP'
 <?php
-[, $arnes, $proyecto, $que] = $argv;
+[, $arnes, $proyecto, $motor, $que] = $argv;
 require $arnes . '/web/src/JUnitParser.php';
 require $arnes . '/web/src/TestRunner.php';
-$t = new TestWeb\TestRunner($proyecto);
-$r = $que === 'core' ? $t->runCore('Test/Core/PegaTest.php') : $t->run('Pega', 'main');
-echo (string) ($r['error'] ?? ''), "\n";
+$t = new TestWeb\TestRunner($proyecto, $motor);
+echo json_encode($que === 'core' ? $t->runCore('Test/Core/PegaTest.php') : $t->run('Pega', 'main')), "\n";
 PHP
-vuelca="echo \"\\n\" . 'Clave: ' . FS_DB_PASS;"
-printf '%s\n' '<?xml version="1.0"?>' '<phpunit bootstrap="Test/test-plugins.php"></phpunit>' > "$E/phpunit-webrunner.xml"
-printf '%s\n' '<?php' "$vuelca" > "$E/Test/test-plugins.php"; printf '%s\n' '<?php' > "$E/Test/bootstrap.php"
-sal="$(php "$BASE/bootstrap.php" "$T" "$P" run 2>&1)"
-grep -q "usa FS_DB_PASS" <<<"$sal" && ok "run(): el bootstrap de phpunit-webrunner.xml (test-plugins.php) usa FS_DB_PASS, y se niega" \
-    || mal "run() no se niega con FS_DB_PASS en el bootstrap de su configuración: $sal"
-printf '%s\n' '<?php' > "$E/Test/test-plugins.php"; printf '%s\n' '<?php' "$vuelca" > "$E/Test/bootstrap.php"
-sal="$(php "$BASE/bootstrap.php" "$T" "$P" run 2>&1)"
-! grep -q "FS_DB_PASS" <<<"$sal" && ok "run(): FS_DB_PASS en un bootstrap que su configuración NO carga no la para" \
-    || mal "run() se niega por un fichero que su configuración no carga: $sal"
-rm -f "$E/phpunit-webrunner.xml"
-printf '%s\n' '<?xml version="1.0"?>' '<phpunit bootstrap="Test/bootstrap.php"></phpunit>' > "$E/phpunit.xml"
-sal="$(php "$BASE/bootstrap.php" "$T" "$P" core 2>&1)"
-grep -q "phpunit.xml (Test/bootstrap.php) usa FS_DB_PASS" <<<"$sal" && ok "runCore(): sin la del runner usa phpunit.xml, y su bootstrap la para" \
-    || mal "runCore() no se niega con FS_DB_PASS en el bootstrap de phpunit.xml: $sal"
-printf '%s\n' '<?php' > "$E/Test/bootstrap.php"
-sal="$(php "$BASE/bootstrap.php" "$T" "$P" core 2>&1)"
-! grep -q "FS_DB_PASS" <<<"$sal" && ok "control: sin FS_DB_PASS, runCore() no lo menciona" || mal "control: sin FS_DB_PASS runCore() se niega igual: $sal"
+vuelca() { printf '%s\n' '<?php' "echo 'Clave: ' . '$CLAVE' . \"\\n\";" > "$P/test-env/facturascripts/vendor/bin/phpunit"; }
+callado() { printf '%s\n' '<?php' "echo \"nada que ver\\n\";" > "$P/test-env/facturascripts/vendor/bin/phpunit"; }
+redactada() { ! grep -qF "$CLAVE" <<<"$sal" && grep -qF '***' <<<"$sal" && grep -qF '"aviso"' <<<"$sal"; }
+vuelca
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
+redactada && ok "run(): un test que imprime la clave sale con *** y aviso, sin la clave" || mal "run() devolvió la clave o no avisó: $sal"
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql core 2>&1)"
+redactada && ok "runCore(): lo mismo" || mal "runCore() devolvió la clave o no avisó: $sal"
+callado
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" mysql run 2>&1)"
+! grep -qF '"aviso"' <<<"$sal" && grep -qF 'nada que ver' <<<"$sal" && ok "control: sin la clave en la salida, ni aviso ni nada cambiado" \
+    || mal "control: run() avisa o cambia la salida sin motivo: $sal"
+sal="$(php "$BASE/bootstrap.php" "$A" "$P" postgresql run 2>&1)"
+redactada && grep -qF '"fase":"esquema"' <<<"$sal" && ok "PostgreSQL: la clave en lo que devuelve pg-esquema tampoco sale" \
+    || mal "PostgreSQL: la respuesta del esquema llevaba la clave o no avisó: $sal"
+sal="$(php "$BASE/bootstrap.php" "$A" "$P" postgresql core 2>&1)"
+redactada && ok "PostgreSQL, runCore(): tampoco" || mal "PostgreSQL runCore() llevaba la clave: $sal"
 
 # --- una ejecución pedida desde OTRA web se rechaza ---------------------------------------------
 # Ejecutar escribe en la base de pruebas: una página cualquiera abierta en el navegador no debe poder

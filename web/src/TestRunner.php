@@ -73,10 +73,6 @@ class TestRunner
         $config = is_file($this->fsDir . '/phpunit-webrunner.xml')
             ? 'phpunit-webrunner.xml'
             : 'phpunit-plugins.xml';
-        $clave = $this->bootstrapUsaClave($config);
-        if ($clave !== '') {
-            return $this->fail($clave);
-        }
 
         // --- lock (serializa ejecuciones) ---
         $lockPath = dirname($this->fsDir) . '/.webrunner.lock';
@@ -142,7 +138,7 @@ class TestRunner
             fclose($lock);
         }
 
-        return [
+        return $this->sinClave([
             'ok' => true,
             'motor' => $this->motor,
             'fase' => 'phpunit',
@@ -157,7 +153,7 @@ class TestRunner
             'suites' => $parsed['suites'] ?? [],
             'totals' => $parsed['totals'] ?? [],
             'failed' => $parsed['failed'] ?? [],
-        ];
+        ]);
     }
 
     /**
@@ -188,10 +184,6 @@ class TestRunner
         }
         // config del runner web (sin stopOnFailure); si no, la estándar del core.
         $config = is_file($this->fsDir . '/phpunit-webrunner.xml') ? 'phpunit-webrunner.xml' : 'phpunit.xml';
-        $clave = $this->bootstrapUsaClave($config);
-        if ($clave !== '') {
-            return $this->fail($clave);
-        }
 
         $lock = fopen(dirname($this->fsDir) . '/.webrunner.lock', 'c');
         if ($lock === false || !flock($lock, LOCK_EX)) {
@@ -225,7 +217,7 @@ class TestRunner
             fclose($lock);
         }
 
-        return [
+        return $this->sinClave([
             'ok' => true,
             'motor' => $this->motor,
             'fase' => 'phpunit',
@@ -239,7 +231,7 @@ class TestRunner
             'suites' => $parsed['suites'] ?? [],
             'totals' => $parsed['totals'] ?? [],
             'failed' => $parsed['failed'] ?? [],
-        ];
+        ]);
     }
 
     /**
@@ -320,29 +312,38 @@ class TestRunner
     }
 
     /**
-     * El Test/bootstrap.php del core escribe la contraseña de la base (FS_DB_PASS) en la salida; la
-     * provisión la quita. Si alguien lo pisó con el del core, cada ejecución la llevaría a stdout y a quien
-     * guarde la respuesta.
+     * La contraseña de la base, fuera de la respuesta. Se mira la SALIDA y no quién la imprime: el
+     * Test/bootstrap.php del core la escribe (la provisión quita esa línea), pero también podría hacerlo un
+     * Init, un test o un include que ninguna lectura del bootstrap alcanza. Así que toda cadena de la
+     * respuesta (stdout, installLog, mensajes de fallo, el esquema) que contenga su VALOR lo lleva
+     * sustituido por «***», con un aviso. El valor se lee del config.php del entorno sólo para comparar: ni
+     * se imprime ni se define como constante en este proceso.
      *
-     * SE MIRA EL BOOTSTRAP QUE DE VERDAD SE VA A CARGAR, el del atributo `bootstrap` de la configuración
-     * elegida, no un fichero fijo: phpunit-webrunner.xml carga Test/test-plugins.php, y vigilar sólo
-     * Test/bootstrap.php no veía nada. Y se busca el USO de FS_DB_PASS, no la etiqueta «DB Pass» del core,
-     * que cualquier otra redacción del mismo volcado esquivaría. En el core la constante sólo aparece en esa
-     * línea. Devuelve el error, o '' si no hay nada que objetar (sin configuración o sin bootstrap, phpunit
-     * fallará solo y lo dirá).
+     * @param array<string, mixed> $respuesta
+     * @return array<string, mixed>
      */
-    private function bootstrapUsaClave(string $config): string
+    private function sinClave(array $respuesta): array
     {
-        $xml = (string) @file_get_contents($this->fsDir . '/' . $config);
-        if (!preg_match('/\bbootstrap="([^"]+)"/', $xml, $m)) {
-            return '';
+        $config = (string) @file_get_contents($this->fsDir . '/config.php');
+        if (!preg_match("/define\\(\\s*'FS_DB_PASS'\\s*,\\s*'((?:[^'\\\\]|\\\\.)*)'\\s*\\)/", $config, $m)) {
+            return $respuesta;
         }
-        $ruta = $m[1][0] === '/' ? $m[1] : $this->fsDir . '/' . $m[1];
-        if (strpos((string) @file_get_contents($ruta), 'FS_DB_PASS') === false) {
-            return '';
+        $clave = str_replace(["\\'", '\\\\'], ["'", '\\'], $m[1]);
+        if ($clave === '') {
+            return $respuesta;
         }
-        return 'El bootstrap que carga ' . $config . ' (' . $m[1] . ') usa FS_DB_PASS, la contraseña de la base: '
-            . 'no se ejecuta. Reprovisiona el entorno con test-env-provision.sh, que la quita.';
+        $vista = false;
+        array_walk_recursive($respuesta, static function (&$v) use ($clave, &$vista) {
+            if (is_string($v) && strpos($v, $clave) !== false) {
+                $v = str_replace($clave, '***', $v);
+                $vista = true;
+            }
+        });
+        if ($vista) {
+            $respuesta['aviso'] = 'La salida contenía la contraseña de la base y se ha sustituido por ***. '
+                . 'Algo la imprime (el bootstrap del core, un Init o un test): reprovisiona el entorno y, si sigue, búscalo.';
+        }
+        return $respuesta;
     }
 
     private function fail(string $message): array
@@ -386,12 +387,12 @@ class TestRunner
         $error = $esquema['error'] ?? ($failed
             ? 'El esquema del escenario no se pudo construir en PostgreSQL: el rojo viene de sus plugins, no de phpunit.'
             : 'El esquema del escenario no se pudo construir en PostgreSQL.');
-        return array_merge(['ok' => false, 'motor' => 'postgresql', 'fase' => 'esquema', 'error' => $error,
+        return $this->sinClave(array_merge(['ok' => false, 'motor' => 'postgresql', 'fase' => 'esquema', 'error' => $error,
             'aislamiento' => $esquema['aislamiento'] ?? 'no se pudo comprobar'], $extra, [
             'installLog' => self::resumenEsquema($esquema),
             'failed' => $failed,
             'esquema' => $esquema,
-        ]);
+        ]));
     }
 
     private static function resumenEsquema(array $e): string

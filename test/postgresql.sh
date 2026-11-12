@@ -6,7 +6,8 @@
 #
 # ## LO QUE COMPRUEBA, y por qué cada cosa
 #
-#   0. la provisión quita FS_DB_PASS del bootstrap que carga phpunit-webrunner.xml (test-plugins.php).
+#   0. la provisión quita del bootstrap de phpunit-webrunner.xml (test-plugins.php) la línea que imprime
+#      FS_DB_PASS, y deja una que sólo la usa.
 #   1. CONTROL POSITIVO: sólo el core construye, con 0 FK tras la pasada 1 y más de 0 tras la 2.
 #   2. LA GUARDA DEL TRUCO de las FK: si los scripts generados dejan de apagar las claves ajenas (es lo
 #      que pasaría si el core dejara de mirar `db_foreign_keys` antes que FS_DB_FOREIGN_KEYS), la pasada
@@ -59,21 +60,22 @@ CONT="$(sed -n 's/^TESTENV_CONTAINER="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$RAIZ/.fs
 [ -n "$CONT" ] && podman container exists "$CONT" || no_comprobado "no encuentro el contenedor de test de '$RAIZ' (TESTENV_CONTAINER)."
 podman exec "$CONT" test -f "$ESQUEMA" || no_comprobado "el contenedor '$CONT' no monta este arnés ($ARNES): probaría otro código."
 
-echo "== 0. la provisión quita FS_DB_PASS del bootstrap que carga la configuración del runner"
-# phpunit-webrunner.xml carga Test/test-plugins.php, no Test/bootstrap.php: se le añade un volcado de la
-# clave con otra etiqueta (el filtro va por el uso de la constante, no por el texto «DB Pass») y se
-# reprovisiona de verdad, en el contenedor. Va ANTES del cerrojo porque la provisión lo toma.
-TP="$D/Test/test-plugins.php"; TP_RESPALDO="$(mktemp)"; cp "$TP" "$TP_RESPALDO"
-printf '%s\n' "echo \"\\n\" . 'Clave: ' . FS_DB_PASS;" >> "$TP"
+echo "== 0. la provisión quita del bootstrap del runner la línea que imprime FS_DB_PASS, y sólo ésa"
+# phpunit-webrunner.xml carga Test/test-plugins.php, no Test/bootstrap.php: se le añaden un volcado de la
+# clave con otra etiqueta y un uso de la constante que NO la imprime, y se reprovisiona de verdad, en el
+# contenedor. El volcado tiene que irse y el otro uso quedarse (borrarlo rompería el bootstrap).
+TP="$D/Test/test-plugins.php"; TP_RESPALDO="$(mktemp)"
+cp "$TP" "$TP_RESPALDO"
+printf '%s\n' "echo \"\\n\" . 'Clave: ' . FS_DB_PASS;" "\$usaClaveSinImprimir = strlen(FS_DB_PASS);" >> "$TP"
 podman exec -i -w "$RAIZ" -e FS_PROJECT_ROOT="$RAIZ" -e NO_COLOR=1 "$CONT" \
     "$ARNES/bin/test-env-provision.sh" --motor postgresql >/dev/null 2>&1; rc_prov=$?
-if [ "$rc_prov" = 0 ] && ! grep -q FS_DB_PASS "$TP" && cmp -s "$TP" "$TP_RESPALDO"; then
-    ok "reprovisionar quita la línea de test-plugins.php y deja el resto como estaba"
+if [ "$rc_prov" = 0 ] && ! grep -q "'Clave: '" "$TP" && grep -qxF '$usaClaveSinImprimir = strlen(FS_DB_PASS);' "$TP" \
+   && [ "$(grep -vxF '$usaClaveSinImprimir = strlen(FS_DB_PASS);' "$TP" | cmp - "$TP_RESPALDO" >/dev/null && echo igual)" = igual ]; then
+    ok "reprovisionar quita la línea que imprime la clave, deja la que sólo la usa, y nada más cambia"
 else
-    mal "tras reprovisionar (rc $rc_prov), test-plugins.php sigue usando FS_DB_PASS o cambió de más"
-    cp "$TP_RESPALDO" "$TP"
+    mal "tras reprovisionar (rc $rc_prov), test-plugins.php no quedó como debía (volcado dentro, uso borrado o más cambios)"
 fi
-rm -f "$TP_RESPALDO"
+cp "$TP_RESPALDO" "$TP"; rm -f "$TP_RESPALDO"
 
 # El mismo cerrojo que el runner y la provisión: esto reescribe el esquema del entorno.
 exec 9>"$(dirname "$D")/.webrunner.lock"
