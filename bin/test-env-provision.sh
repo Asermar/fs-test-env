@@ -538,15 +538,24 @@ BOOTSTRAP="$TESTENV_DIR/Test/bootstrap.php"
 # cuando falta `Plugins::init()`, mientras que el `echo` vuelve en CADA actualización del core (el
 # paso 2 hace `git checkout --` de este fichero antes de parchearlo), así que hay que quitarlo
 # siempre. Es idempotente: si ya no está, no hace nada.
-if [ -f "$BOOTSTRAP" ] && grep -q "DB Pass" "$BOOTSTRAP"; then
-    log_step "Quitando del bootstrap el volcado de la contraseña (viene del core)..."
-    tmp_bs="$(mktemp)"
-    grep -v "DB Pass" "$BOOTSTRAP" > "$tmp_bs" && mv "$tmp_bs" "$BOOTSTRAP"
-    if grep -q "DB Pass" "$BOOTSTRAP"; then
-        echo "ERROR: no se pudo quitar la contraseña del bootstrap; los tests la imprimirán." >&2
-        exit 1
+#
+# Se quita de CADA bootstrap que nombre una configuración de PHPUnit del entorno (phpunit.xml carga
+# Test/bootstrap.php; phpunit-plugins.xml y phpunit-webrunner.xml, Test/test-plugins.php), y por el USO de
+# FS_DB_PASS, no por la etiqueta «DB Pass»: es el mismo criterio con el que el runner se niega a ejecutar.
+# En el core la constante sólo aparece en esa línea del volcado.
+while IFS= read -r bs; do
+    f="$TESTENV_DIR/$bs"
+    if [ -f "$f" ] && grep -q "FS_DB_PASS" "$f"; then
+        log_step "Quitando de $bs el volcado de la contraseña (viene del core)..."
+        tmp_bs="$(mktemp)"
+        grep -v "FS_DB_PASS" "$f" > "$tmp_bs" && cat "$tmp_bs" > "$f"
+        rm -f "$tmp_bs"
+        if grep -q "FS_DB_PASS" "$f"; then
+            echo "ERROR: no se pudo quitar la contraseña de $bs; los tests la imprimirán." >&2
+            exit 1
+        fi
     fi
-fi
+done < <(sed -n 's/.*bootstrap="\([^"]*\)".*/\1/p' "$TESTENV_DIR"/phpunit*.xml 2>/dev/null | sort -u)
 
 if [ -f "$BOOTSTRAP" ] && ! grep -q "Plugins::init()" "$BOOTSTRAP"; then
     log_step "Parcheando Test/bootstrap.php (Plugins::init)..."

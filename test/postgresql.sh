@@ -6,6 +6,7 @@
 #
 # ## LO QUE COMPRUEBA, y por qué cada cosa
 #
+#   0. la provisión quita FS_DB_PASS del bootstrap que carga phpunit-webrunner.xml (test-plugins.php).
 #   1. CONTROL POSITIVO: sólo el core construye, con 0 FK tras la pasada 1 y más de 0 tras la 2.
 #   2. LA GUARDA DEL TRUCO de las FK: si los scripts generados dejan de apagar las claves ajenas (es lo
 #      que pasaría si el core dejara de mirar `db_foreign_keys` antes que FS_DB_FOREIGN_KEYS), la pasada
@@ -58,6 +59,21 @@ CONT="$(sed -n 's/^TESTENV_CONTAINER="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$RAIZ/.fs
 [ -n "$CONT" ] && podman container exists "$CONT" || no_comprobado "no encuentro el contenedor de test de '$RAIZ' (TESTENV_CONTAINER)."
 podman exec "$CONT" test -f "$ESQUEMA" || no_comprobado "el contenedor '$CONT' no monta este arnés ($ARNES): probaría otro código."
 
+echo "== 0. la provisión quita FS_DB_PASS del bootstrap que carga la configuración del runner"
+# phpunit-webrunner.xml carga Test/test-plugins.php, no Test/bootstrap.php: se le añade un volcado de la
+# clave con otra etiqueta (el filtro va por el uso de la constante, no por el texto «DB Pass») y se
+# reprovisiona de verdad, en el contenedor. Va ANTES del cerrojo porque la provisión lo toma.
+TP="$D/Test/test-plugins.php"; TP_RESPALDO="$(mktemp)"; cp "$TP" "$TP_RESPALDO"
+printf '%s\n' "echo \"\\n\" . 'Clave: ' . FS_DB_PASS;" >> "$TP"
+podman exec -i -w "$RAIZ" -e FS_PROJECT_ROOT="$RAIZ" -e NO_COLOR=1 "$CONT" \
+    "$ARNES/bin/test-env-provision.sh" --motor postgresql >/dev/null 2>&1; rc_prov=$?
+if [ "$rc_prov" = 0 ] && ! grep -q FS_DB_PASS "$TP" && cmp -s "$TP" "$TP_RESPALDO"; then
+    ok "reprovisionar quita la línea de test-plugins.php y deja el resto como estaba"
+else
+    mal "tras reprovisionar (rc $rc_prov), test-plugins.php sigue usando FS_DB_PASS o cambió de más"
+    cp "$TP_RESPALDO" "$TP"
+fi
+rm -f "$TP_RESPALDO"
 
 # El mismo cerrojo que el runner y la provisión: esto reescribe el esquema del entorno.
 exec 9>"$(dirname "$D")/.webrunner.lock"
@@ -65,13 +81,12 @@ flock -w 300 9 || no_comprobado "el entorno está en uso (cerrojo ocupado más d
 
 LISTA="$D/Test/Plugins/install-plugins.txt"
 RESPALDO="$(mktemp -d)"
-cp "$D/warmup-schema.php" "$D/Test/install-plugins.php" "$D/Test/bootstrap.php" "$RESPALDO/"
+cp "$D/warmup-schema.php" "$D/Test/install-plugins.php" "$RESPALDO/"
 PRUEBA="$D/Plugins/PruebaInitFalla"
 recoger() {
     rm -rf -- "$PRUEBA"
     cp "$RESPALDO/warmup-schema.php" "$D/warmup-schema.php"
     cp "$RESPALDO/install-plugins.php" "$D/Test/install-plugins.php"
-    cp "$RESPALDO/bootstrap.php" "$D/Test/bootstrap.php"
     rm -rf -- "$RESPALDO"
     podman exec fstest-pg psql -U postgres -qc "REVOKE CONNECT ON DATABASE fstest_centinela FROM \"$ROL\"" >/dev/null 2>&1 || true
     : > "$LISTA"; podman exec -w "$D" "$CONT" php "$ESQUEMA" "$D" >/dev/null 2>&1 || true
@@ -118,16 +133,6 @@ else
     mal "sin el interruptor en los scripts debía pedir reprovisionar: $J"
 fi
 cp "$RESPALDO/install-plugins.php" "$D/Test/install-plugins.php"
-
-echo "== 2c. un bootstrap que vuelca la contraseña: no se ejecuta"
-printf '%s\n' "echo \"\\n\" . 'DB Pass: ' . FS_DB_PASS;" >> "$D/Test/bootstrap.php"
-corre ''
-if [ "$(campo ok)" = false ] && printf '%s' "$(campo error)" | grep -q "vuelca la contraseña de la base (DB Pass)"; then
-    ok "con «DB Pass» en el bootstrap se niega y pide reprovisionar"
-else
-    mal "con «DB Pass» en el bootstrap debía negarse: $J"
-fi
-cp "$RESPALDO/bootstrap.php" "$D/Test/bootstrap.php"
 
 echo "== 3. no inventa rojos: $LIMPIO solo"
 if [ -d "$D/Plugins/$LIMPIO" ]; then

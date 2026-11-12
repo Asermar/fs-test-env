@@ -69,14 +69,14 @@ class TestRunner
         if (!is_file($phpunit)) {
             return $this->fail('Falta PHPUnit. Provisiona el entorno (composer install).');
         }
-        if ($this->bootstrapVuelcaClave()) {
-            return $this->fail(self::MENSAJE_BOOTSTRAP);
-        }
-
         // config: preferimos la del runner web (sin stopOnFailure); si no, la estándar.
         $config = is_file($this->fsDir . '/phpunit-webrunner.xml')
             ? 'phpunit-webrunner.xml'
             : 'phpunit-plugins.xml';
+        $clave = $this->bootstrapUsaClave($config);
+        if ($clave !== '') {
+            return $this->fail($clave);
+        }
 
         // --- lock (serializa ejecuciones) ---
         $lockPath = dirname($this->fsDir) . '/.webrunner.lock';
@@ -186,12 +186,12 @@ class TestRunner
         if (!is_file($this->fsDir . '/vendor/bin/phpunit')) {
             return $this->fail('Falta PHPUnit. Provisiona el entorno (composer install).');
         }
-        if ($this->bootstrapVuelcaClave()) {
-            return $this->fail(self::MENSAJE_BOOTSTRAP);
-        }
-
         // config del runner web (sin stopOnFailure); si no, la estándar del core.
         $config = is_file($this->fsDir . '/phpunit-webrunner.xml') ? 'phpunit-webrunner.xml' : 'phpunit.xml';
+        $clave = $this->bootstrapUsaClave($config);
+        if ($clave !== '') {
+            return $this->fail($clave);
+        }
 
         $lock = fopen(dirname($this->fsDir) . '/.webrunner.lock', 'c');
         if ($lock === false || !flock($lock, LOCK_EX)) {
@@ -319,16 +319,30 @@ class TestRunner
         return '';
     }
 
-    private const MENSAJE_BOOTSTRAP = 'El Test/bootstrap.php del entorno vuelca la contraseña de la base (DB Pass): '
-        . 'no se ejecuta. Reprovisiona el entorno con test-env-provision.sh, que lo quita.';
-
     /**
-     * El bootstrap del core escribe «DB Pass: <clave>» en la salida; la provisión lo quita. Si alguien lo
-     * pisó con el del core, cada ejecución la llevaría a stdout y a quien guarde la respuesta.
+     * El Test/bootstrap.php del core escribe la contraseña de la base (FS_DB_PASS) en la salida; la
+     * provisión la quita. Si alguien lo pisó con el del core, cada ejecución la llevaría a stdout y a quien
+     * guarde la respuesta.
+     *
+     * SE MIRA EL BOOTSTRAP QUE DE VERDAD SE VA A CARGAR, el del atributo `bootstrap` de la configuración
+     * elegida, no un fichero fijo: phpunit-webrunner.xml carga Test/test-plugins.php, y vigilar sólo
+     * Test/bootstrap.php no veía nada. Y se busca el USO de FS_DB_PASS, no la etiqueta «DB Pass» del core,
+     * que cualquier otra redacción del mismo volcado esquivaría. En el core la constante sólo aparece en esa
+     * línea. Devuelve el error, o '' si no hay nada que objetar (sin configuración o sin bootstrap, phpunit
+     * fallará solo y lo dirá).
      */
-    private function bootstrapVuelcaClave(): bool
+    private function bootstrapUsaClave(string $config): string
     {
-        return strpos((string) @file_get_contents($this->fsDir . '/Test/bootstrap.php'), 'DB Pass') !== false;
+        $xml = (string) @file_get_contents($this->fsDir . '/' . $config);
+        if (!preg_match('/\bbootstrap="([^"]+)"/', $xml, $m)) {
+            return '';
+        }
+        $ruta = $m[1][0] === '/' ? $m[1] : $this->fsDir . '/' . $m[1];
+        if (strpos((string) @file_get_contents($ruta), 'FS_DB_PASS') === false) {
+            return '';
+        }
+        return 'El bootstrap que carga ' . $config . ' (' . $m[1] . ') usa FS_DB_PASS, la contraseña de la base: '
+            . 'no se ejecuta. Reprovisiona el entorno con test-env-provision.sh, que la quita.';
     }
 
     private function fail(string $message): array

@@ -117,27 +117,41 @@ for m in run runCore; do
 done
 
 # --- un bootstrap que vuelca la contraseña no se ejecuta --------------------------------------
-# El bootstrap del core escribe «DB Pass: <clave>» y la provisión lo quita; si alguien lo pisa, el runner
-# se niega, en los dos motores. Contra TestRunner::run() REAL, con un entorno de pega que tiene todo lo
-# que run() comprueba antes (core, config.php, phpunit) y un plugin con su escenario.
+# El Test/bootstrap.php del core escribe FS_DB_PASS en la salida y la provisión lo quita; si alguien lo
+# pisa, el runner se niega, en los dos motores. Se mira el bootstrap que carga la configuración que se va
+# a usar (phpunit-webrunner.xml carga Test/test-plugins.php), no un fichero fijo. Contra TestRunner REAL,
+# con un entorno de pega que tiene todo lo que run() y runCore() comprueban antes.
 printf '\n\033[1;36m— bootstrap que vuelca la contraseña —\033[0m\n'
 P="$BASE/proyecto"; E="$P/test-env/facturascripts"
-mkdir -p "$P/src/Plugins/Pega/Test/main" "$E/Core" "$E/vendor/bin" "$E/Test"
-: > "$E/Core/Kernel.php"; : > "$E/config.php"; printf '<?php\n' > "$E/vendor/bin/phpunit"
+mkdir -p "$P/src/Plugins/Pega/Test/main" "$E/Core" "$E/vendor/bin" "$E/Test/Core"
+: > "$E/Core/Kernel.php"; : > "$E/config.php"; printf '<?php\n' > "$E/vendor/bin/phpunit"; : > "$E/Test/Core/PegaTest.php"
 cat > "$BASE/bootstrap.php" <<'PHP'
 <?php
-[, $arnes, $proyecto] = $argv;
+[, $arnes, $proyecto, $que] = $argv;
 require $arnes . '/web/src/JUnitParser.php';
 require $arnes . '/web/src/TestRunner.php';
-$r = (new TestWeb\TestRunner($proyecto))->run('Pega', 'main');
+$t = new TestWeb\TestRunner($proyecto);
+$r = $que === 'core' ? $t->runCore('Test/Core/PegaTest.php') : $t->run('Pega', 'main');
 echo (string) ($r['error'] ?? ''), "\n";
 PHP
-printf '%s\n' '<?php' "echo \"\\n\" . 'DB Pass: ' . FS_DB_PASS;" > "$E/Test/bootstrap.php"
-sal="$(php "$BASE/bootstrap.php" "$T" "$P" 2>&1)"
-grep -q "vuelca la contraseña de la base (DB Pass)" <<<"$sal" && ok "con «DB Pass» en el bootstrap, run() se niega" || mal "run() no se niega con «DB Pass»: $sal"
+vuelca="echo \"\\n\" . 'Clave: ' . FS_DB_PASS;"
+printf '%s\n' '<?xml version="1.0"?>' '<phpunit bootstrap="Test/test-plugins.php"></phpunit>' > "$E/phpunit-webrunner.xml"
+printf '%s\n' '<?php' "$vuelca" > "$E/Test/test-plugins.php"; printf '%s\n' '<?php' > "$E/Test/bootstrap.php"
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" run 2>&1)"
+grep -q "usa FS_DB_PASS" <<<"$sal" && ok "run(): el bootstrap de phpunit-webrunner.xml (test-plugins.php) usa FS_DB_PASS, y se niega" \
+    || mal "run() no se niega con FS_DB_PASS en el bootstrap de su configuración: $sal"
+printf '%s\n' '<?php' > "$E/Test/test-plugins.php"; printf '%s\n' '<?php' "$vuelca" > "$E/Test/bootstrap.php"
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" run 2>&1)"
+! grep -q "FS_DB_PASS" <<<"$sal" && ok "run(): FS_DB_PASS en un bootstrap que su configuración NO carga no la para" \
+    || mal "run() se niega por un fichero que su configuración no carga: $sal"
+rm -f "$E/phpunit-webrunner.xml"
+printf '%s\n' '<?xml version="1.0"?>' '<phpunit bootstrap="Test/bootstrap.php"></phpunit>' > "$E/phpunit.xml"
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" core 2>&1)"
+grep -q "phpunit.xml (Test/bootstrap.php) usa FS_DB_PASS" <<<"$sal" && ok "runCore(): sin la del runner usa phpunit.xml, y su bootstrap la para" \
+    || mal "runCore() no se niega con FS_DB_PASS en el bootstrap de phpunit.xml: $sal"
 printf '%s\n' '<?php' > "$E/Test/bootstrap.php"
-sal="$(php "$BASE/bootstrap.php" "$T" "$P" 2>&1)"
-! grep -q "DB Pass" <<<"$sal" && ok "control: sin «DB Pass», run() no lo menciona" || mal "control: sin «DB Pass» run() se niega igual: $sal"
+sal="$(php "$BASE/bootstrap.php" "$T" "$P" core 2>&1)"
+! grep -q "FS_DB_PASS" <<<"$sal" && ok "control: sin FS_DB_PASS, runCore() no lo menciona" || mal "control: sin FS_DB_PASS runCore() se niega igual: $sal"
 
 # --- una ejecución pedida desde OTRA web se rechaza ---------------------------------------------
 # Ejecutar escribe en la base de pruebas: una página cualquiera abierta en el navegador no debe poder

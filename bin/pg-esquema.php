@@ -88,13 +88,6 @@ foreach (['warmup-schema.php', 'Test/install-plugins.php'] as $generado) {
     }
 }
 
-// Y el bootstrap, sin el volcado de la contraseña que trae el del core («DB Pass: …»): la provisión lo
-// quita, y si alguien lo pisó, cada ejecución escribiría la clave de la base en la salida de phpunit.
-if (strpos((string) @file_get_contents($dir . '/Test/bootstrap.php'), 'DB Pass') !== false) {
-    salir(1, 'el Test/bootstrap.php de este entorno vuelca la contraseña de la base (DB Pass). '
-        . 'Reprovisiónalo:  test-env-provision.sh --motor postgresql');
-}
-
 $aislamiento = aislamiento($q);
 if ($aislamiento !== 'aislado') {
     salir(1, $aislamiento);
