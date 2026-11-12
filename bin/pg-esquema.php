@@ -78,6 +78,16 @@ if (!$link) {
         . trim((string) ($e['message'] ?? '')) . '. ¿Está fstest-pg arriba (pg-up.sh) y creada la base (okoworktree up)?');
 }
 
+// Los scripts generados tienen que ser los de la provisión, con el interruptor sin FK. Si alguien los
+// pisó (el andamiaje del core trae los suyos), la pasada 1 crearía FK y la guarda culparía al core
+// cuando lo que falta es reprovisionar: se dice eso, antes de tocar nada.
+foreach (['warmup-schema.php', 'Test/install-plugins.php'] as $generado) {
+    if (strpos((string) @file_get_contents($dir . '/' . $generado), 'FS_TEST_SIN_FK') === false) {
+        salir(1, "el $generado de este entorno no es el que genera el arnés (le falta FS_TEST_SIN_FK). "
+            . 'Reprovisiónalo:  test-env-provision.sh --motor postgresql  (o bin/run.sh, que lo hace si falta config.php).');
+    }
+}
+
 $aislamiento = aislamiento($q);
 if ($aislamiento !== 'aislado') {
     salir(1, $aislamiento);

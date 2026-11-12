@@ -103,6 +103,19 @@ else
 fi
 cp "$RESPALDO/warmup-schema.php" "$D/warmup-schema.php"; cp "$RESPALDO/install-plugins.php" "$D/Test/install-plugins.php"
 
+echo "== 2b. scripts generados pisados por los del core: lo dice, no culpa al core"
+# Lo que pasaba tras un `okoworktree up` que volvía a montar el andamiaje: install-plugins.php sin el
+# interruptor. Se simula quitándole las líneas de FS_TEST_SIN_FK.
+grep -v FS_TEST_SIN_FK "$RESPALDO/install-plugins.php" > "$D/Test/install-plugins.php"
+corre ''
+if [ "$(campo ok)" = false ] && printf '%s' "$(campo error)" | grep -q "le falta FS_TEST_SIN_FK" \
+   && ! printf '%s' "$J" | grep -q "ya no respeta"; then
+    ok "sin el interruptor en los scripts: pide reprovisionar, no culpa al core"
+else
+    mal "sin el interruptor en los scripts debía pedir reprovisionar: $J"
+fi
+cp "$RESPALDO/install-plugins.php" "$D/Test/install-plugins.php"
+
 echo "== 3. no inventa rojos: $LIMPIO solo"
 if [ -d "$D/Plugins/$LIMPIO" ]; then
     corre "$LIMPIO"
