@@ -69,6 +69,9 @@ class TestRunner
         if (!is_file($phpunit)) {
             return $this->fail('Falta PHPUnit. Provisiona el entorno (composer install).');
         }
+        if ($this->bootstrapVuelcaClave()) {
+            return $this->fail(self::MENSAJE_BOOTSTRAP);
+        }
 
         // config: preferimos la del runner web (sin stopOnFailure); si no, la estándar.
         $config = is_file($this->fsDir . '/phpunit-webrunner.xml')
@@ -182,6 +185,9 @@ class TestRunner
         }
         if (!is_file($this->fsDir . '/vendor/bin/phpunit')) {
             return $this->fail('Falta PHPUnit. Provisiona el entorno (composer install).');
+        }
+        if ($this->bootstrapVuelcaClave()) {
+            return $this->fail(self::MENSAJE_BOOTSTRAP);
         }
 
         // config del runner web (sin stopOnFailure); si no, la estándar del core.
@@ -311,6 +317,18 @@ class TestRunner
             return 'Petición rechazada: su Origin (' . $origen . ') no es este host.';
         }
         return '';
+    }
+
+    private const MENSAJE_BOOTSTRAP = 'El Test/bootstrap.php del entorno vuelca la contraseña de la base (DB Pass): '
+        . 'no se ejecuta. Reprovisiona el entorno con test-env-provision.sh, que lo quita.';
+
+    /**
+     * El bootstrap del core escribe «DB Pass: <clave>» en la salida; la provisión lo quita. Si alguien lo
+     * pisó con el del core, cada ejecución la llevaría a stdout y a quien guarde la respuesta.
+     */
+    private function bootstrapVuelcaClave(): bool
+    {
+        return strpos((string) @file_get_contents($this->fsDir . '/Test/bootstrap.php'), 'DB Pass') !== false;
     }
 
     private function fail(string $message): array

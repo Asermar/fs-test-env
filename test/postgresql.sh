@@ -65,12 +65,13 @@ flock -w 300 9 || no_comprobado "el entorno está en uso (cerrojo ocupado más d
 
 LISTA="$D/Test/Plugins/install-plugins.txt"
 RESPALDO="$(mktemp -d)"
-cp "$D/warmup-schema.php" "$D/Test/install-plugins.php" "$RESPALDO/"
+cp "$D/warmup-schema.php" "$D/Test/install-plugins.php" "$D/Test/bootstrap.php" "$RESPALDO/"
 PRUEBA="$D/Plugins/PruebaInitFalla"
 recoger() {
     rm -rf -- "$PRUEBA"
     cp "$RESPALDO/warmup-schema.php" "$D/warmup-schema.php"
     cp "$RESPALDO/install-plugins.php" "$D/Test/install-plugins.php"
+    cp "$RESPALDO/bootstrap.php" "$D/Test/bootstrap.php"
     rm -rf -- "$RESPALDO"
     podman exec fstest-pg psql -U postgres -qc "REVOKE CONNECT ON DATABASE fstest_centinela FROM \"$ROL\"" >/dev/null 2>&1 || true
     : > "$LISTA"; podman exec -w "$D" "$CONT" php "$ESQUEMA" "$D" >/dev/null 2>&1 || true
@@ -117,6 +118,16 @@ else
     mal "sin el interruptor en los scripts debía pedir reprovisionar: $J"
 fi
 cp "$RESPALDO/install-plugins.php" "$D/Test/install-plugins.php"
+
+echo "== 2c. un bootstrap que vuelca la contraseña: no se ejecuta"
+printf '%s\n' "echo \"\\n\" . 'DB Pass: ' . FS_DB_PASS;" >> "$D/Test/bootstrap.php"
+corre ''
+if [ "$(campo ok)" = false ] && printf '%s' "$(campo error)" | grep -q "vuelca la contraseña de la base (DB Pass)"; then
+    ok "con «DB Pass» en el bootstrap se niega y pide reprovisionar"
+else
+    mal "con «DB Pass» en el bootstrap debía negarse: $J"
+fi
+cp "$RESPALDO/bootstrap.php" "$D/Test/bootstrap.php"
 
 echo "== 3. no inventa rojos: $LIMPIO solo"
 if [ -d "$D/Plugins/$LIMPIO" ]; then
